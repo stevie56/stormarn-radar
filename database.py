@@ -34,6 +34,10 @@ def init_db():
             lng REAL,
             industry TEXT,
             employee_count TEXT,
+            linkedin TEXT,
+            xing TEXT,
+            twitter TEXT,
+            instagram TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
@@ -68,8 +72,19 @@ def init_db():
             created_at TEXT DEFAULT (datetime('now'))
         );
     """)
+    # Migration: Social-Media-Spalten nachrüsten falls noch nicht vorhanden
+    _migrate_social_media_columns(conn)
+
     conn.commit()
     conn.close()
+
+
+def _migrate_social_media_columns(conn):
+    """Fügt Social-Media-Spalten zur bestehenden Datenbank hinzu (idempotent)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(companies)")}
+    for col in ("linkedin", "xing", "twitter", "instagram"):
+        if col not in existing:
+            conn.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT")
 
 
 # ──────────────────────────────────────────────────────────
@@ -77,18 +92,24 @@ def init_db():
 # ──────────────────────────────────────────────────────────
 
 def upsert_company(name, website, address="", city="", postal_code="",
-                   lat=None, lng=None, industry="", employee_count=""):
+                   lat=None, lng=None, industry="", employee_count="",
+                   linkedin="", xing="", twitter="", instagram=""):
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
-        INSERT INTO companies (name, website, address, city, postal_code, lat, lng, industry, employee_count)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO companies (name, website, address, city, postal_code, lat, lng,
+                               industry, employee_count, linkedin, xing, twitter, instagram)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(website) DO UPDATE SET
             name=excluded.name, address=excluded.address,
             city=excluded.city, lat=excluded.lat, lng=excluded.lng,
-            industry=excluded.industry, updated_at=datetime('now')
+            industry=excluded.industry,
+            linkedin=excluded.linkedin, xing=excluded.xing,
+            twitter=excluded.twitter, instagram=excluded.instagram,
+            updated_at=datetime('now')
         RETURNING id
-    """, (name, website, address, city, postal_code, lat, lng, industry, employee_count))
+    """, (name, website, address, city, postal_code, lat, lng,
+          industry, employee_count, linkedin, xing, twitter, instagram))
     row = c.fetchone()
     conn.commit()
     conn.close()

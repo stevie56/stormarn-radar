@@ -238,6 +238,19 @@ elif page == "🏢 Unternehmen":
                 st.markdown(f"**Adresse:** {c.get('address','')}, {c.get('city','')}")
                 st.markdown(f"**Branche:** {c.get('industry', '–')}")
 
+                # Social-Media-Links
+                sm_links = []
+                if c.get("linkedin"):
+                    sm_links.append(f"[LinkedIn]({c['linkedin']})")
+                if c.get("xing"):
+                    sm_links.append(f"[XING]({c['xing']})")
+                if c.get("twitter"):
+                    sm_links.append(f"[X/Twitter]({c['twitter']})")
+                if c.get("instagram"):
+                    sm_links.append(f"[Instagram]({c['instagram']})")
+                if sm_links:
+                    st.markdown("**Social Media:** " + " · ".join(sm_links))
+
                 ki_apps = c.get("ki_anwendungen", [])
                 if isinstance(ki_apps, str):
                     try:
@@ -341,120 +354,250 @@ elif page == "🗺️ Karte":
 elif page == "➕ Neu analysieren":
     st.header("➕ Unternehmen hinzufügen & analysieren")
 
-    with st.form("new_company_form"):
-        st.subheader("Unternehmensdaten")
-        col1, col2 = st.columns(2)
+    tab_single, tab_csv = st.tabs(["📝 Einzeln", "📂 CSV-Import"])
 
-        with col1:
-            name = st.text_input("Firmenname *", placeholder="Musterfirma GmbH")
-            website = st.text_input("Website *", placeholder="https://musterfirma.de")
-            industry = st.text_input("Branche", placeholder="IT / Logistik / Handel...")
-        with col2:
-            address = st.text_input("Straße & Hausnummer", placeholder="Hauptstraße 1")
-            postal_code = st.text_input("PLZ", placeholder="23843")
-            city = st.text_input("Stadt", placeholder="Bad Oldesloe")
-            employee_count = st.selectbox("Mitarbeiter",
-                ["–", "1-9", "10-49", "50-249", "250-999", "1000+"])
+    # ── Tab 1: Einzelnes Unternehmen ──────────────────────
+    with tab_single:
+        with st.form("new_company_form"):
+            st.subheader("Unternehmensdaten")
+            col1, col2 = st.columns(2)
 
-        col_opt1, col_opt2 = st.columns(2)
-        with col_opt1:
-            do_geo = st.checkbox("Geocodierung (Adresse → Koordinaten)", value=True)
-        with col_opt2:
-            do_bio = st.checkbox("Biografie generieren", value=True)
+            with col1:
+                name = st.text_input("Firmenname *", placeholder="Musterfirma GmbH")
+                website = st.text_input("Website *", placeholder="https://musterfirma.de")
+                industry = st.text_input("Branche", placeholder="IT / Logistik / Handel...")
+            with col2:
+                address = st.text_input("Straße & Hausnummer", placeholder="Hauptstraße 1")
+                postal_code = st.text_input("PLZ", placeholder="23843")
+                city = st.text_input("Stadt", placeholder="Bad Oldesloe")
+                employee_count = st.selectbox("Mitarbeiter",
+                    ["–", "1-9", "10-49", "50-249", "250-999", "1000+"])
 
-        submitted = st.form_submit_button("🚀 Analysieren", type="primary")
+            st.subheader("Social Media")
+            col_sm1, col_sm2, col_sm3, col_sm4 = st.columns(4)
+            with col_sm1:
+                linkedin = st.text_input("LinkedIn", placeholder="https://linkedin.com/company/...")
+            with col_sm2:
+                xing = st.text_input("XING", placeholder="https://xing.com/pages/...")
+            with col_sm3:
+                twitter = st.text_input("X / Twitter", placeholder="https://x.com/...")
+            with col_sm4:
+                instagram = st.text_input("Instagram", placeholder="https://instagram.com/...")
 
-    if submitted:
-        if not name or not website:
-            st.error("Bitte Firmenname und Website angeben.")
-        elif not os.getenv("OPENAI_API_KEY"):
-            st.error("OpenAI API Key fehlt. Bitte in der Sidebar eingeben.")
-        else:
-            progress = st.progress(0, "Starte Analyse...")
+            col_opt1, col_opt2 = st.columns(2)
+            with col_opt1:
+                do_geo = st.checkbox("Geocodierung (Adresse → Koordinaten)", value=True)
+            with col_opt2:
+                do_bio = st.checkbox("Biografie generieren", value=True)
 
-            # 1. Scraping
-            progress.progress(20, "🌐 Website wird gelesen...")
-            scrape_result = scraper.scrape_website(website)
+            submitted = st.form_submit_button("🚀 Analysieren", type="primary")
 
-            if scrape_result["error"]:
-                st.warning(f"Scraping-Warnung: {scrape_result['error']}")
-                website_text = f"Firmenname: {name}"
+        if submitted:
+            if not name or not website:
+                st.error("Bitte Firmenname und Website angeben.")
+            elif not os.getenv("OPENAI_API_KEY"):
+                st.error("OpenAI API Key fehlt. Bitte in der Sidebar eingeben.")
             else:
-                website_text = scrape_result["text"]
-                st.success(f"✅ {scrape_result['pages_scraped']} Seiten gelesen · "
-                           f"{len(scrape_result['keyword_hits'])} Keyword-Treffer: "
-                           f"{', '.join(scrape_result['keyword_hits'][:5])}")
+                progress = st.progress(0, "Starte Analyse...")
 
-            # 2. Geocodierung
-            lat, lng = None, None
-            if do_geo and (address or city):
-                progress.progress(40, "📍 Geocodierung...")
-                lat, lng = geo_mapper.geocode_address(address, city, postal_code)
-                if lat:
-                    st.success(f"📍 Koordinaten: {lat:.4f}, {lng:.4f}")
+                # 1. Scraping
+                progress.progress(20, "🌐 Website wird gelesen...")
+                scrape_result = scraper.scrape_website(website)
+
+                if scrape_result["error"]:
+                    st.warning(f"Scraping-Warnung: {scrape_result['error']}")
+                    website_text = f"Firmenname: {name}"
                 else:
-                    st.info("Adresse konnte nicht geocodiert werden.")
+                    website_text = scrape_result["text"]
+                    st.success(f"✅ {scrape_result['pages_scraped']} Seiten gelesen · "
+                               f"{len(scrape_result['keyword_hits'])} Keyword-Treffer: "
+                               f"{', '.join(scrape_result['keyword_hits'][:5])}")
 
-            # 3. Company speichern
-            company_id = db.upsert_company(
-                name=name, website=website, address=address,
-                city=city, postal_code=postal_code,
-                lat=lat, lng=lng, industry=industry,
-                employee_count=employee_count
-            )
+                # 2. Geocodierung
+                lat, lng = None, None
+                if do_geo and (address or city):
+                    progress.progress(40, "📍 Geocodierung...")
+                    lat, lng = geo_mapper.geocode_address(address, city, postal_code)
+                    if lat:
+                        st.success(f"📍 Koordinaten: {lat:.4f}, {lng:.4f}")
+                    else:
+                        st.info("Adresse konnte nicht geocodiert werden.")
 
-            # 4. LLM-Analyse
-            progress.progress(60, "🤖 KI-Analyse...")
-            try:
-                classification = analyzer.classify_company(name, website_text)
-
-                biografie = ""
-                if do_bio:
-                    progress.progress(80, "✍️ Biografie wird geschrieben...")
-                    biografie = analyzer.generate_biography(name, website_text, classification)
-
-                db.save_analysis(
-                    company_id=company_id,
-                    kategorie=classification["kategorie"],
-                    begruendung=classification["begruendung"],
-                    ki_anwendungen=classification["ki_anwendungen"],
-                    vertrauen=classification["vertrauen"],
-                    biografie=biografie,
-                    raw_text=website_text[:2000]
+                # 3. Company speichern
+                company_id = db.upsert_company(
+                    name=name, website=website, address=address,
+                    city=city, postal_code=postal_code,
+                    lat=lat, lng=lng, industry=industry,
+                    employee_count=employee_count,
+                    linkedin=linkedin, xing=xing,
+                    twitter=twitter, instagram=instagram
                 )
 
-                db.log_event(company_id, "NEU",
-                             f"Analysiert: {classification['kategorie']} (Score: {classification['vertrauen']})")
+                # 4. LLM-Analyse
+                progress.progress(60, "🤖 KI-Analyse...")
+                try:
+                    classification = analyzer.classify_company(name, website_text)
 
-                progress.progress(100, "✅ Fertig!")
+                    biografie = ""
+                    if do_bio:
+                        progress.progress(80, "✍️ Biografie wird geschrieben...")
+                        biografie = analyzer.generate_biography(name, website_text, classification)
 
-                # Ergebnis anzeigen
-                st.markdown("---")
-                st.subheader("📊 Analyseergebnis")
+                    db.save_analysis(
+                        company_id=company_id,
+                        kategorie=classification["kategorie"],
+                        begruendung=classification["begruendung"],
+                        ki_anwendungen=classification["ki_anwendungen"],
+                        vertrauen=classification["vertrauen"],
+                        biografie=biografie,
+                        raw_text=website_text[:2000]
+                    )
 
-                col1, col2 = st.columns([2, 1])
-                with col1:
-                    st.markdown(f"### {name}")
-                    kat = classification["kategorie"]
-                    st.markdown(category_badge(kat), unsafe_allow_html=True)
-                    st.markdown(f"\n**Begründung:** {classification['begruendung']}")
+                    db.log_event(company_id, "NEU",
+                                 f"Analysiert: {classification['kategorie']} (Score: {classification['vertrauen']})")
 
-                    if classification.get("ki_anwendungen"):
-                        st.markdown("**KI-Anwendungen:**")
-                        for app in classification["ki_anwendungen"]:
-                            st.markdown(f"• {app}")
+                    progress.progress(100, "✅ Fertig!")
 
-                    if biografie:
-                        st.markdown("---")
-                        st.markdown("**Biografie:**")
-                        st.markdown(f"*{biografie}*")
+                    # Ergebnis anzeigen
+                    st.markdown("---")
+                    st.subheader("📊 Analyseergebnis")
 
-                with col2:
-                    st.metric("Vertrauens-Score", f"{classification['vertrauen']}/100")
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.markdown(f"### {name}")
+                        kat = classification["kategorie"]
+                        st.markdown(category_badge(kat), unsafe_allow_html=True)
+                        st.markdown(f"\n**Begründung:** {classification['begruendung']}")
+
+                        if classification.get("ki_anwendungen"):
+                            st.markdown("**KI-Anwendungen:**")
+                            for app in classification["ki_anwendungen"]:
+                                st.markdown(f"• {app}")
+
+                        if biografie:
+                            st.markdown("---")
+                            st.markdown("**Biografie:**")
+                            st.markdown(f"*{biografie}*")
+
+                    with col2:
+                        st.metric("Vertrauens-Score", f"{classification['vertrauen']}/100")
+
+                except Exception as e:
+                    st.error(f"LLM-Analyse fehlgeschlagen: {e}")
+                    progress.empty()
+
+    # ── Tab 2: CSV-Massenimport ───────────────────────────
+    with tab_csv:
+        st.subheader("Unternehmen per CSV importieren")
+        st.markdown("""
+Lade eine CSV-Datei hoch um mehrere Unternehmen auf einmal in die Datenbank zu importieren.
+Die Unternehmen werden **ohne** KI-Analyse gespeichert – du kannst sie danach einzeln analysieren.
+
+**Pflichtfelder:** `name`, `website`
+**Optionale Felder:** `adresse`, `plz`, `ort`, `branche`, `mitarbeiter`, `linkedin`, `xing`, `twitter`, `instagram`
+        """)
+
+        # Beispiel-CSV zum Download
+        beispiel_csv_path = os.path.join(os.path.dirname(__file__), "data", "unternehmen_stormarn_beispiel.csv")
+        if os.path.exists(beispiel_csv_path):
+            with open(beispiel_csv_path, "rb") as f:
+                st.download_button(
+                    label="⬇️ Beispiel-CSV herunterladen",
+                    data=f,
+                    file_name="unternehmen_stormarn_beispiel.csv",
+                    mime="text/csv",
+                    help="Lade diese Vorlage herunter, fülle sie mit echten Unternehmensdaten und lade sie hoch."
+                )
+
+        st.markdown("---")
+        uploaded_file = st.file_uploader(
+            "CSV- oder Excel-Datei hochladen",
+            type=["csv", "xlsx", "xls"],
+            help="CSV: Trennzeichen Komma, UTF-8. Excel: .xlsx oder .xls, erste Zeile = Spaltenköpfe."
+        )
+
+        if uploaded_file is not None:
+            try:
+                fname = uploaded_file.name.lower()
+                if fname.endswith(".csv"):
+                    df_import = pd.read_csv(uploaded_file, dtype=str).fillna("")
+                else:
+                    df_import = pd.read_excel(uploaded_file, dtype=str).fillna("")
+
+                # Pflichtfelder prüfen
+                missing_cols = [c for c in ["name", "website"] if c not in df_import.columns]
+                if missing_cols:
+                    st.error(f"Fehlende Pflichtfelder in der CSV: {', '.join(missing_cols)}")
+                else:
+                    st.success(f"✅ {len(df_import)} Zeilen erkannt")
+                    st.dataframe(df_import, use_container_width=True, hide_index=True)
+
+                    col_geo, col_btn = st.columns([1, 1])
+                    with col_geo:
+                        do_geo_csv = st.checkbox(
+                            "Geocodierung beim Import (langsamer)",
+                            value=False,
+                            help="Für jede Adresse werden Koordinaten via Nominatim abgefragt."
+                        )
+
+                    with col_btn:
+                        do_import = st.button("📥 Import starten", type="primary")
+
+                    if do_import:
+                        progress_bar = st.progress(0)
+                        imported, skipped, errors = 0, 0, 0
+                        status_box = st.empty()
+
+                        for i, row in df_import.iterrows():
+                            pct = int((i + 1) / len(df_import) * 100)
+                            progress_bar.progress(pct, f"Importiere {i+1}/{len(df_import)}: {row.get('name', '')}")
+
+                            row_name = row.get("name", "").strip()
+                            row_website = row.get("website", "").strip()
+
+                            if not row_name or not row_website:
+                                skipped += 1
+                                continue
+
+                            lat, lng = None, None
+                            if do_geo_csv:
+                                row_address = row.get("adresse", "")
+                                row_city = row.get("ort", "")
+                                row_plz = row.get("plz", "")
+                                if row_address or row_city:
+                                    lat, lng = geo_mapper.geocode_address(
+                                        row_address, row_city, row_plz
+                                    )
+
+                            try:
+                                db.upsert_company(
+                                    name=row_name,
+                                    website=row_website,
+                                    address=row.get("adresse", ""),
+                                    city=row.get("ort", ""),
+                                    postal_code=row.get("plz", ""),
+                                    lat=lat,
+                                    lng=lng,
+                                    industry=row.get("branche", ""),
+                                    employee_count=row.get("mitarbeiter", ""),
+                                    linkedin=row.get("linkedin", ""),
+                                    xing=row.get("xing", ""),
+                                    twitter=row.get("twitter", ""),
+                                    instagram=row.get("instagram", "")
+                                )
+                                imported += 1
+                            except Exception as e:
+                                errors += 1
+
+                        progress_bar.progress(100, "Fertig!")
+                        st.success(f"Import abgeschlossen: **{imported}** importiert · "
+                                   f"**{skipped}** übersprungen · **{errors}** Fehler")
+                        if imported > 0:
+                            st.info("Die Unternehmen sind jetzt unter **🏢 Unternehmen** sichtbar. "
+                                    "Analysiere sie einzeln unter **📝 Einzeln**.")
 
             except Exception as e:
-                st.error(f"LLM-Analyse fehlgeschlagen: {e}")
-                progress.empty()
+                st.error(f"Fehler beim Lesen der CSV: {e}")
 
 # ──────────────────────────────────────────────────────────
 # PAGE: Trends
