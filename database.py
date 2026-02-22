@@ -38,6 +38,7 @@ def init_db():
             xing TEXT,
             twitter TEXT,
             instagram TEXT,
+            tags TEXT DEFAULT '[]',
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
@@ -51,6 +52,7 @@ def init_db():
             vertrauen INTEGER,
             biografie TEXT,
             raw_text TEXT,
+            ki_aktiv INTEGER DEFAULT 0,
             analyzed_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (company_id) REFERENCES companies(id)
         );
@@ -72,19 +74,25 @@ def init_db():
             created_at TEXT DEFAULT (datetime('now'))
         );
     """)
-    # Migration: Social-Media-Spalten nachrüsten falls noch nicht vorhanden
-    _migrate_social_media_columns(conn)
+    # Migrationen für bestehende Datenbanken
+    _migrate_columns(conn)
 
     conn.commit()
     conn.close()
 
 
-def _migrate_social_media_columns(conn):
-    """Fügt Social-Media-Spalten zur bestehenden Datenbank hinzu (idempotent)."""
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(companies)")}
+def _migrate_columns(conn):
+    """Fügt fehlende Spalten zur bestehenden Datenbank hinzu (idempotent)."""
+    company_cols = {row[1] for row in conn.execute("PRAGMA table_info(companies)")}
     for col in ("linkedin", "xing", "twitter", "instagram"):
-        if col not in existing:
+        if col not in company_cols:
             conn.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT")
+    if "tags" not in company_cols:
+        conn.execute("ALTER TABLE companies ADD COLUMN tags TEXT DEFAULT '[]'")
+
+    analysis_cols = {row[1] for row in conn.execute("PRAGMA table_info(analyses)")}
+    if "ki_aktiv" not in analysis_cols:
+        conn.execute("ALTER TABLE analyses ADD COLUMN ki_aktiv INTEGER DEFAULT 0")
 
 
 # ──────────────────────────────────────────────────────────
@@ -93,33 +101,48 @@ def _migrate_social_media_columns(conn):
 
 def upsert_company(name, website, address="", city="", postal_code="",
                    lat=None, lng=None, industry="", employee_count="",
-                   linkedin="", xing="", twitter="", instagram=""):
+                   linkedin="", xing="", twitter="", instagram="",
+                   tags=None):
+    tags_json = json.dumps(tags or [], ensure_ascii=False)
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
         INSERT INTO companies (name, website, address, city, postal_code, lat, lng,
-                               industry, employee_count, linkedin, xing, twitter, instagram)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               industry, employee_count, linkedin, xing, twitter, instagram, tags)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(website) DO UPDATE SET
             name=excluded.name, address=excluded.address,
             city=excluded.city, lat=excluded.lat, lng=excluded.lng,
             industry=excluded.industry,
             linkedin=excluded.linkedin, xing=excluded.xing,
             twitter=excluded.twitter, instagram=excluded.instagram,
+            tags=excluded.tags,
             updated_at=datetime('now')
         RETURNING id
     """, (name, website, address, city, postal_code, lat, lng,
-          industry, employee_count, linkedin, xing, twitter, instagram))
+          industry, employee_count, linkedin, xing, twitter, instagram, tags_json))
     row = c.fetchone()
     conn.commit()
     conn.close()
     return row[0] if row else None
 
 
+def update_company_tags(company_id: int, tags: list):
+    """Aktualisiert die Tags eines Unternehmens."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE companies SET tags=?, updated_at=datetime('now') WHERE id=?",
+        (json.dumps(tags, ensure_ascii=False), company_id)
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_all_companies():
     conn = get_connection()
     rows = conn.execute("""
-        SELECT c.*, a.kategorie, a.vertrauen, a.biografie, a.ki_anwendungen, a.analyzed_at
+        SELECT c.*, a.kategorie, a.vertrauen, a.biografie, a.ki_anwendungen,
+               a.ki_aktiv, a.analyzed_at
         FROM companies c
         LEFT JOIN analyses a ON a.id = (
             SELECT id FROM analyses WHERE company_id = c.id ORDER BY analyzed_at DESC LIMIT 1
@@ -143,14 +166,15 @@ def get_company_by_id(company_id):
 
 def save_analysis(company_id, kategorie, begruendung, ki_anwendungen,
                   vertrauen, biografie, raw_text=""):
+    ki_aktiv = 1 if kategorie in ("ECHTER_EINSATZ", "INTEGRATION") else 0
     conn = get_connection()
     conn.execute("""
         INSERT INTO analyses (company_id, kategorie, begruendung, ki_anwendungen,
-                              vertrauen, biografie, raw_text)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+                              vertrauen, biografie, raw_text, ki_aktiv)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (company_id, kategorie, begruendung,
           json.dumps(ki_anwendungen, ensure_ascii=False),
-          vertrauen, biografie, raw_text))
+          vertrauen, biografie, raw_text, ki_aktiv))
     conn.commit()
     conn.close()
 
@@ -242,6 +266,44 @@ def get_latest_trend_report():
     """).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# ──────────────────────────────────────────────────────────
+# Tags
+# ──────────────────────────────────────────────────────────
+
+def get_all_tags() -> list:
+    """Gibt alle einzigartigen Tags aus allen Unternehmen zurück (alphabetisch)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT tags FROM companies WHERE tags IS NOT NULL AND tags != '[]'"
+    ).fetchall()
+    conn.close()
+    tags: set = set()
+    for row in rows:
+        try:
+            tags.update(json.loads(row[0]))
+        except Exception:
+            pass
+    return sorted(t for t in tags if t)
+
+
+def get_tag_stats() -> dict:
+    """Gibt je Tag die Anzahl der Unternehmen zurück, die diesen Tag haben."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT tags FROM companies WHERE tags IS NOT NULL AND tags != '[]'"
+    ).fetchall()
+    conn.close()
+    counts: dict = {}
+    for row in rows:
+        try:
+            for tag in json.loads(row[0]):
+                if tag:
+                    counts[tag] = counts.get(tag, 0) + 1
+        except Exception:
+            pass
+    return dict(sorted(counts.items(), key=lambda x: x[1], reverse=True))
 
 
 # ──────────────────────────────────────────────────────────
