@@ -15,12 +15,13 @@ import config_loader as cfg
 # ──────────────────────────────────────────────────────────
 
 _LINKEDIN_PATTERN = re.compile(
-    r"https?://(?:www\.)?linkedin\.com/(?:company|in)/([^/\s\"'?#><]+)", re.I)
+    r"https?://(?:www\.)?linkedin\.com/company/([^/\s\"'?#><]+)", re.I)
 
 
 def extract_social_media(html_content: str) -> dict:
     """
-    Extrahiert den LinkedIn-Profil-Link aus einem HTML-Dokument.
+    Extrahiert den LinkedIn-Unternehmensseiten-Link aus einem HTML-Dokument.
+    Nur /company/-URLs werden erkannt – keine Personenprofile (/in/).
 
     Returns:
         dict mit key: linkedin (leer wenn nicht gefunden)
