@@ -28,11 +28,19 @@ CATEGORY_COLORS = {
 }
 
 CATEGORY_LABELS = {
-    "ECHTER_EINSATZ": "✅ Echter KI-Einsatz",
-    "INTEGRATION":    "🔗 KI-Integration",
-    "BUZZWORD":       "⚠️ KI-Buzzword",
-    "KEIN_KI":        "❌ Kein KI-Bezug",
-    "UNBEKANNT":      "❓ Unbekannt",
+    "ECHTER_EINSATZ": "Echter KI-Einsatz",
+    "INTEGRATION":    "KI-Integration",
+    "BUZZWORD":       "KI-Buzzword",
+    "KEIN_KI":        "Kein KI-Bezug",
+    "UNBEKANNT":      "Unbekannt",
+}
+
+CATEGORY_LABELS_BADGE = {
+    "ECHTER_EINSATZ": "[+] Echter KI-Einsatz",
+    "INTEGRATION":    "[~] KI-Integration",
+    "BUZZWORD":       "[!] KI-Buzzword",
+    "KEIN_KI":        "[-] Kein KI-Bezug",
+    "UNBEKANNT":      "[?] Unbekannt",
 }
 
 
@@ -96,6 +104,7 @@ def generate_company_profile(company: dict, analysis: dict) -> str:
     badge_color = CATEGORY_COLORS.get(kategorie, colors.grey)
     badge_label = CATEGORY_LABELS.get(kategorie, kategorie)
 
+    badge_label = CATEGORY_LABELS_BADGE.get(kategorie, kategorie)
     badge_data = [[Paragraph(
         f"<font color='white' size='11'><b>{badge_label}</b></font>",
         styles["Normal"]
@@ -215,41 +224,67 @@ def generate_overview_pdf(companies: list) -> str:
                             leftMargin=2*cm, rightMargin=2*cm)
 
     styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle("OvTitle", parent=styles["Normal"],
+                                 fontSize=22, leading=28, spaceAfter=4,
+                                 textColor=_hex_color(primary),
+                                 fontName="Helvetica-Bold")
+    sub_style = ParagraphStyle("OvSub", parent=styles["Normal"],
+                               fontSize=13, leading=18, spaceAfter=6,
+                               textColor=colors.grey)
+
     story = []
 
     # Titel
+    story.append(Paragraph(radar_name, title_style))
     story.append(Paragraph(
-        f"<font size='22' color='{primary}'><b>{radar_name}</b></font>",
-        styles["Normal"]
+        f"Übersicht – {region} | {datetime.now().strftime('%d.%m.%Y')}",
+        sub_style
     ))
-    story.append(Paragraph(
-        f"<font size='14' color='grey'>Übersicht – {region} | {datetime.now().strftime('%d.%m.%Y')}</font>",
-        styles["Normal"]
-    ))
-    story.append(Spacer(1, 0.5*cm))
+    story.append(Spacer(1, 0.3*cm))
     story.append(HRFlowable(color=_hex_color(primary), thickness=2, width="100%"))
     story.append(Spacer(1, 0.5*cm))
 
-    # Tabelle
-    table_data = [["Unternehmen", "Stadt", "Branche", "KI-Kategorie", "Score"]]
+    # Tabelle – A4 nutzbare Breite: ~481 pt (nach 2 cm Ränder)
+    col_w = [135, 75, 125, 100, 46]  # in Punkten, Summe = 481 pt
+
+    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontSize=9, leading=12)
+    head_style = ParagraphStyle("Head", parent=styles["Normal"], fontSize=9,
+                                leading=12, textColor=colors.white,
+                                fontName="Helvetica-Bold")
+
+    def _p(text, style=None):
+        return Paragraph(str(text), style or cell_style)
+
+    table_data = [[_p("Unternehmen", head_style), _p("Stadt", head_style),
+                   _p("Branche", head_style), _p("KI-Kategorie", head_style),
+                   _p("Score", head_style)]]
+
     for c in companies:
+        kat = c.get("kategorie", "UNBEKANNT")
+        kat_label = CATEGORY_LABELS.get(kat, kat)
+        kat_color = CATEGORY_COLORS.get(kat, colors.grey)
+        kat_cell = Paragraph(
+            f"<font color='#{kat_color.hexval()[2:]}'><b>{kat_label}</b></font>",
+            cell_style
+        )
         table_data.append([
-            c.get("name", ""),
-            c.get("city", ""),
-            c.get("industry", ""),
-            CATEGORY_LABELS.get(c.get("kategorie", ""), c.get("kategorie", "")),
-            str(c.get("vertrauen", "–")),
+            _p(c.get("name", "")),
+            _p(c.get("city", "")),
+            _p(c.get("industry", "")),
+            kat_cell,
+            _p(str(c.get("vertrauen", "–"))),
         ])
 
-    table = Table(table_data, colWidths=["30%", "15%", "20%", "25%", "10%"])
+    table = Table(table_data, colWidths=col_w, repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), _hex_color(primary)),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f0f4f8")]),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cccccc")),
     ]))
