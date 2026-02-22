@@ -768,7 +768,7 @@ elif page == "📄 PDF-Export":
         st.info("Noch keine analysierten Unternehmen.")
         st.stop()
 
-    tab1, tab2 = st.tabs(["Einzelner Steckbrief", "Übersichts-PDF"])
+    tab1, tab2, tab3 = st.tabs(["Einzelner Steckbrief", "Übersichts-PDF", "📂 Gespeicherte PDFs"])
 
     with tab1:
         company_names = {c["name"]: c["id"] for c in analyzed}
@@ -815,6 +815,34 @@ elif page == "📄 PDF-Export":
                     file_name="Stormarn_KI_Uebersicht.pdf",
                     mime="application/pdf"
                 )
+
+    with tab3:
+        st.subheader("📂 Gespeicherte PDF-Steckbriefe")
+        from pathlib import Path
+        exports_dir = Path(__file__).parent / "exports"
+        pdf_files = sorted(exports_dir.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+        if not pdf_files:
+            st.info("Noch keine PDFs vorhanden. Erstelle zunächst einen Steckbrief.")
+        else:
+            st.caption(f"{len(pdf_files)} PDF(s) verfügbar")
+            for pdf_path in pdf_files:
+                size_kb = pdf_path.stat().st_size // 1024
+                col_name, col_size, col_btn = st.columns([4, 1, 2])
+                with col_name:
+                    st.write(f"📄 **{pdf_path.stem.replace('_', ' ')}**")
+                with col_size:
+                    st.caption(f"{size_kb} KB")
+                with col_btn:
+                    with open(pdf_path, "rb") as f:
+                        st.download_button(
+                            label="⬇️ Download",
+                            data=f,
+                            file_name=pdf_path.name,
+                            mime="application/pdf",
+                            key=f"dl_{pdf_path.name}"
+                        )
+                st.markdown("---")
 
 # ──────────────────────────────────────────────────────────
 # PAGE: Einstellungen
