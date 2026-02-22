@@ -1,0 +1,74 @@
+radar:
+  name: "Stormarn KI-Radar"
+  region: "Kreis Stormarn"
+  region_bounds:
+    north: 53.85
+    south: 53.55
+    east: 10.50
+    west: 10.00
+  topic: "Künstliche Intelligenz"
+  topic_short: "KI"
+
+  keywords:
+    - "Künstliche Intelligenz"
+    - "Machine Learning"
+    - "Deep Learning"
+    - "AI"
+    - "KI"
+    - "Automatisierung"
+    - "neuronale Netze"
+    - "Natural Language Processing"
+    - "Computer Vision"
+    - "Predictive Analytics"
+    - "ChatGPT"
+    - "Large Language Model"
+
+  llm:
+    model: "gpt-4o-mini"
+    classification_prompt: |
+      Du analysierst Unternehmenswebseiten auf echten KI-Einsatz im Kreis Stormarn.
+
+      Klassifiziere das Unternehmen in eine der folgenden Kategorien:
+      - "ECHTER_EINSATZ": Konkretes KI-Produkt, Eigenentwicklung oder nachweisbarer Einsatz
+      - "INTEGRATION": Nutzt KI-Tools von Drittanbietern (z.B. ChatGPT, Copilot)
+      - "BUZZWORD": Erwähnt KI, ohne konkreten Einsatz
+      - "KEIN_KI": Kein KI-Bezug gefunden
+
+      Antworte immer als JSON mit den Feldern:
+      kategorie, begruendung, ki_anwendungen (Liste), vertrauen (0-100)
+
+    biography_prompt: |
+      Schreibe eine professionelle, prägnante Kurzbiografie (max. 150 Wörter) eines Unternehmens
+      aus dem Kreis Stormarn mit Fokus auf dessen KI-Aktivitäten.
+      Stil: sachlich, informativ, positiv. Geeignet für ein professionelles Netzwerkdokument.
+
+    trend_prompt: |
+      Analysiere die folgenden KI-Aktivitäten von Unternehmen im Kreis Stormarn
+      und identifiziere: Branchen-Schwerpunkte, technologische Trends, Entwicklungspotenziale.
+      Antworte strukturiert auf Deutsch.
+
+  alerts:
+    enabled: true
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    from_email: ""        # Deine E-Mail hier
+    to_email: ""          # Empfänger hier
+    check_interval_hours: 24
+    trigger_keywords:
+      - "KI"
+      - "Machine Learning"
+      - "Stellenausschreibung"
+      - "Launch"
+      - "Partnerschaft"
+
+  pdf:
+    logo_text: "Stormarn KI-Radar"
+    primary_color: "#1a5276"
+    accent_color: "#2e86c1"
+    footer: "Kreis Stormarn – Wirtschaftsförderung & Innovation"
+
+  scraper:
+    timeout_seconds: 15
+    max_pages_per_site: 3
+    delay_between_requests: 2
+    user_agent: "StormarnRadar/1.0 (Wirtschaftsanalyse)"
