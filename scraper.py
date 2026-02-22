@@ -10,39 +10,6 @@ from urllib.parse import urljoin, urlparse
 
 import config_loader as cfg
 
-# ──────────────────────────────────────────────────────────
-# Social-Media-Erkennung
-# ──────────────────────────────────────────────────────────
-
-_LINKEDIN_PATTERN = re.compile(
-    r"https?://(?:www\.)?linkedin\.com/company/([^/\s\"'?#><]+)", re.I)
-
-
-def extract_social_media(html_content: str) -> dict:
-    """
-    Extrahiert den LinkedIn-Unternehmensseiten-Link aus einem HTML-Dokument.
-    Nur /company/-URLs werden erkannt – keine Personenprofile (/in/).
-
-    Returns:
-        dict mit key: linkedin (leer wenn nicht gefunden)
-    """
-    result = {"linkedin": ""}
-    soup = BeautifulSoup(html_content, "html.parser")
-
-    # 1. Versuch: in allen <a href>-Tags suchen
-    for tag in soup.find_all("a", href=True):
-        m = _LINKEDIN_PATTERN.search(tag["href"])
-        if m:
-            result["linkedin"] = m.group(0).split("?")[0].split("#")[0].rstrip("/")
-            return result
-
-    # 2. Fallback: rohen HTML-Text durchsuchen (z.B. JS-Variablen, Meta-Tags)
-    m = _LINKEDIN_PATTERN.search(html_content)
-    if m:
-        result["linkedin"] = m.group(0).split("?")[0].split("#")[0].rstrip("/")
-
-    return result
-
 
 def _get_headers():
     return {
@@ -105,7 +72,6 @@ def scrape_website(url: str) -> dict:
         "text": "",
         "pages_scraped": 0,
         "keyword_hits": [],
-        "social_media": {"linkedin": ""},
         "error": None
     }
 
@@ -120,9 +86,6 @@ def scrape_website(url: str) -> dict:
 
         title_tag = soup.find("title")
         result["title"] = title_tag.get_text(strip=True) if title_tag else ""
-
-        # Social-Media-Links von der Hauptseite extrahieren
-        result["social_media"] = extract_social_media(resp.text)
 
         texts = [_clean_text(resp.text)]
         result["pages_scraped"] = 1
