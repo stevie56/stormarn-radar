@@ -413,24 +413,54 @@ elif page == "➕ Neu analysieren":
                                f"{len(scrape_result['keyword_hits'])} Keyword-Treffer: "
                                f"{', '.join(scrape_result['keyword_hits'][:5])}")
 
+                # 1.5. Social-Media-Erkennung
+                progress.progress(35, "🔗 Social-Media-Profile werden erkannt...")
+                detected_sm = scrape_result.get("social_media", {})
+
+                # Manuelle Eingabe hat Vorrang; erkannte Profile füllen leere Felder
+                final_linkedin  = linkedin  or detected_sm.get("linkedin",  "")
+                final_xing      = xing      or detected_sm.get("xing",      "")
+                final_twitter   = twitter   or detected_sm.get("twitter",   "")
+                final_instagram = instagram or detected_sm.get("instagram", "")
+
+                # Zeige automatisch erkannte Profile (nur die, die nicht manuell eingegeben wurden)
+                _auto_detected = {
+                    k: v for k, v in [
+                        ("LinkedIn",  detected_sm.get("linkedin",  "")),
+                        ("XING",      detected_sm.get("xing",      "")),
+                        ("X/Twitter", detected_sm.get("twitter",   "")),
+                        ("Instagram", detected_sm.get("instagram", "")),
+                    ] if v and not {
+                        "LinkedIn": linkedin, "XING": xing,
+                        "X/Twitter": twitter, "Instagram": instagram
+                    }.get(k)
+                }
+                if _auto_detected:
+                    _links_str = " · ".join(
+                        f"[{plat}]({url})" for plat, url in _auto_detected.items()
+                    )
+                    st.info(f"🔗 Social Media automatisch erkannt: {_links_str}")
+                elif not scrape_result["error"]:
+                    st.caption("🔗 Keine Social-Media-Profile auf der Website gefunden.")
+
                 # 2. Geocodierung
                 lat, lng = None, None
                 if do_geo and (address or city):
-                    progress.progress(40, "📍 Geocodierung...")
+                    progress.progress(45, "📍 Geocodierung...")
                     lat, lng = geo_mapper.geocode_address(address, city, postal_code)
                     if lat:
                         st.success(f"📍 Koordinaten: {lat:.4f}, {lng:.4f}")
                     else:
                         st.info("Adresse konnte nicht geocodiert werden.")
 
-                # 3. Company speichern
+                # 3. Company speichern (mit auto-erkannten SM-Profilen)
                 company_id = db.upsert_company(
                     name=name, website=website, address=address,
                     city=city, postal_code=postal_code,
                     lat=lat, lng=lng, industry=industry,
                     employee_count=employee_count,
-                    linkedin=linkedin, xing=xing,
-                    twitter=twitter, instagram=instagram
+                    linkedin=final_linkedin, xing=final_xing,
+                    twitter=final_twitter, instagram=final_instagram
                 )
 
                 # 4. LLM-Analyse

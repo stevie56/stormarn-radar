@@ -10,6 +10,66 @@ from urllib.parse import urljoin, urlparse
 
 import config_loader as cfg
 
+# ──────────────────────────────────────────────────────────
+# Social-Media-Erkennung
+# ──────────────────────────────────────────────────────────
+
+_SM_PATTERNS = {
+    "linkedin":  re.compile(
+        r"https?://(?:www\.)?linkedin\.com/(?:company|in)/([^/\s\"'?#><]+)", re.I),
+    "xing":      re.compile(
+        r"https?://(?:www\.)?xing\.com/(?:pages|companies|profile)/([^/\s\"'?#><]+)", re.I),
+    "twitter":   re.compile(
+        r"https?://(?:www\.)?(?:twitter|x)\.com/([A-Za-z0-9_]{1,50})(?:[/?#]|$)", re.I),
+    "instagram": re.compile(
+        r"https?://(?:www\.)?instagram\.com/([A-Za-z0-9_.]{1,50})(?:[/?#]|$)", re.I),
+}
+
+# Handles, die häufig False-Positives erzeugen (z.B. Share-Buttons)
+_SM_BLOCKLIST = {
+    "share", "sharer", "intent", "search", "hashtag", "explore",
+    "home", "i", "about", "legal", "privacy", "terms", "jobs",
+}
+
+
+def extract_social_media(html_content: str) -> dict:
+    """
+    Extrahiert Social-Media-Profil-Links aus einem HTML-Dokument.
+
+    Returns:
+        dict mit keys: linkedin, xing, twitter, instagram (leer wenn nicht gefunden)
+    """
+    result = {"linkedin": "", "xing": "", "twitter": "", "instagram": ""}
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    # Alle href-Werte aus <a>-Tags sammeln
+    hrefs = [tag["href"] for tag in soup.find_all("a", href=True)]
+
+    for platform, pattern in _SM_PATTERNS.items():
+        # 1. Versuch: in allen Links suchen
+        for href in hrefs:
+            m = pattern.search(href)
+            if not m:
+                continue
+            handle = m.group(1).rstrip("/").lower()
+            if platform in ("twitter", "instagram") and handle in _SM_BLOCKLIST:
+                continue
+            url = m.group(0).split("?")[0].split("#")[0].rstrip("/")
+            result[platform] = url
+            break
+
+        # 2. Fallback: rohen HTML-Text durchsuchen (z.B. JS-Variablen, Meta-Tags)
+        if not result[platform]:
+            for m in pattern.finditer(html_content):
+                handle = m.group(1).rstrip("/").lower()
+                if platform in ("twitter", "instagram") and handle in _SM_BLOCKLIST:
+                    continue
+                url = m.group(0).split("?")[0].split("#")[0].rstrip("/")
+                result[platform] = url
+                break
+
+    return result
+
 
 def _get_headers():
     return {
@@ -72,6 +132,7 @@ def scrape_website(url: str) -> dict:
         "text": "",
         "pages_scraped": 0,
         "keyword_hits": [],
+        "social_media": {"linkedin": "", "xing": "", "twitter": "", "instagram": ""},
         "error": None
     }
 
@@ -86,6 +147,9 @@ def scrape_website(url: str) -> dict:
 
         title_tag = soup.find("title")
         result["title"] = title_tag.get_text(strip=True) if title_tag else ""
+
+        # Social-Media-Links von der Hauptseite extrahieren
+        result["social_media"] = extract_social_media(resp.text)
 
         texts = [_clean_text(resp.text)]
         result["pages_scraped"] = 1
