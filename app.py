@@ -238,6 +238,19 @@ elif page == "🏢 Unternehmen":
                 st.markdown(f"**Adresse:** {c.get('address','')}, {c.get('city','')}")
                 st.markdown(f"**Branche:** {c.get('industry', '–')}")
 
+                # Social-Media-Links
+                sm_links = []
+                if c.get("linkedin"):
+                    sm_links.append(f"[LinkedIn]({c['linkedin']})")
+                if c.get("xing"):
+                    sm_links.append(f"[XING]({c['xing']})")
+                if c.get("twitter"):
+                    sm_links.append(f"[X/Twitter]({c['twitter']})")
+                if c.get("instagram"):
+                    sm_links.append(f"[Instagram]({c['instagram']})")
+                if sm_links:
+                    st.markdown("**Social Media:** " + " · ".join(sm_links))
+
                 ki_apps = c.get("ki_anwendungen", [])
                 if isinstance(ki_apps, str):
                     try:
@@ -360,6 +373,17 @@ elif page == "➕ Neu analysieren":
                 employee_count = st.selectbox("Mitarbeiter",
                     ["–", "1-9", "10-49", "50-249", "250-999", "1000+"])
 
+            st.subheader("Social Media")
+            col_sm1, col_sm2, col_sm3, col_sm4 = st.columns(4)
+            with col_sm1:
+                linkedin = st.text_input("LinkedIn", placeholder="https://linkedin.com/company/...")
+            with col_sm2:
+                xing = st.text_input("XING", placeholder="https://xing.com/pages/...")
+            with col_sm3:
+                twitter = st.text_input("X / Twitter", placeholder="https://x.com/...")
+            with col_sm4:
+                instagram = st.text_input("Instagram", placeholder="https://instagram.com/...")
+
             col_opt1, col_opt2 = st.columns(2)
             with col_opt1:
                 do_geo = st.checkbox("Geocodierung (Adresse → Koordinaten)", value=True)
@@ -404,7 +428,9 @@ elif page == "➕ Neu analysieren":
                     name=name, website=website, address=address,
                     city=city, postal_code=postal_code,
                     lat=lat, lng=lng, industry=industry,
-                    employee_count=employee_count
+                    employee_count=employee_count,
+                    linkedin=linkedin, xing=xing,
+                    twitter=twitter, instagram=instagram
                 )
 
                 # 4. LLM-Analyse
@@ -468,7 +494,7 @@ Lade eine CSV-Datei hoch um mehrere Unternehmen auf einmal in die Datenbank zu i
 Die Unternehmen werden **ohne** KI-Analyse gespeichert – du kannst sie danach einzeln analysieren.
 
 **Pflichtfelder:** `name`, `website`
-**Optionale Felder:** `adresse`, `plz`, `ort`, `branche`, `mitarbeiter`
+**Optionale Felder:** `adresse`, `plz`, `ort`, `branche`, `mitarbeiter`, `linkedin`, `xing`, `twitter`, `instagram`
         """)
 
         # Beispiel-CSV zum Download
@@ -553,7 +579,11 @@ Die Unternehmen werden **ohne** KI-Analyse gespeichert – du kannst sie danach 
                                     lat=lat,
                                     lng=lng,
                                     industry=row.get("branche", ""),
-                                    employee_count=row.get("mitarbeiter", "")
+                                    employee_count=row.get("mitarbeiter", ""),
+                                    linkedin=row.get("linkedin", ""),
+                                    xing=row.get("xing", ""),
+                                    twitter=row.get("twitter", ""),
+                                    instagram=row.get("instagram", "")
                                 )
                                 imported += 1
                             except Exception as e:
