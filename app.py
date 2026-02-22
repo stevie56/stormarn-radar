@@ -1,0 +1,661 @@
+"""
+app.py – Streamlit Dashboard für den Stormarn KI-Radar
+Starte mit: streamlit run app.py
+"""
+import json
+import os
+import streamlit as st
+import pandas as pd
+import folium
+from streamlit_folium import st_folium
+
+import config_loader as cfg
+import database as db
+import scraper
+import analyzer
+import geo_mapper
+import alert
+import pdf_export
+
+# ──────────────────────────────────────────────────────────
+# Seitenkonfiguration
+# ──────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title=cfg.get("radar.name", "Regional Radar"),
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Datenbank initialisieren
+db.init_db()
+
+# ──────────────────────────────────────────────────────────
+# Styling
+# ──────────────────────────────────────────────────────────
+PRIMARY = cfg.get("radar.pdf.primary_color", "#1a5276")
+ACCENT = cfg.get("radar.pdf.accent_color", "#2e86c1")
+
+st.markdown(f"""
+<style>
+    .main-header {{
+        background: linear-gradient(135deg, {PRIMARY} 0%, {ACCENT} 100%);
+        padding: 1.5rem 2rem;
+        border-radius: 12px;
+        color: white;
+        margin-bottom: 1.5rem;
+    }}
+    .metric-card {{
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 1rem;
+        text-align: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }}
+    .badge {{
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: bold;
+        color: white;
+    }}
+    .badge-echt {{ background: #1e8449; }}
+    .badge-int {{ background: #d4ac0d; }}
+    .badge-buzz {{ background: #e67e22; }}
+    .badge-kein {{ background: #95a5a6; }}
+    .stButton>button {{
+        background-color: {PRIMARY};
+        color: white;
+        border: none;
+        border-radius: 8px;
+    }}
+</style>
+""", unsafe_allow_html=True)
+
+# ──────────────────────────────────────────────────────────
+# Header
+# ──────────────────────────────────────────────────────────
+radar_name = cfg.get("radar.name", "Regional Radar")
+region = cfg.get("radar.region", "")
+topic = cfg.get("radar.topic", "")
+
+st.markdown(f"""
+<div class="main-header">
+    <h1 style="margin:0;font-size:2rem;">🎯 {radar_name}</h1>
+    <p style="margin:0.3rem 0 0 0;opacity:0.85;">{region} · {topic} · Live-Dashboard</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ──────────────────────────────────────────────────────────
+# Sidebar – Navigation
+# ──────────────────────────────────────────────────────────
+with st.sidebar:
+    st.image("https://via.placeholder.com/250x60/1a5276/ffffff?text=Stormarn+Radar",
+             use_column_width=True)
+    st.markdown("---")
+    page = st.radio(
+        "Navigation",
+        ["📊 Dashboard", "🏢 Unternehmen", "🗺️ Karte",
+         "➕ Neu analysieren", "📈 Trends", "📋 Aktivitätslog",
+         "📄 PDF-Export", "⚙️ Einstellungen"],
+        label_visibility="collapsed"
+    )
+    st.markdown("---")
+    api_key = st.text_input("OpenAI API Key", type="password",
+                             value=os.getenv("OPENAI_API_KEY", ""),
+                             help="Wird nur für die Analyse benötigt")
+    if api_key:
+        os.environ["OPENAI_API_KEY"] = api_key
+
+# ──────────────────────────────────────────────────────────
+# Hilfsfunktionen
+# ──────────────────────────────────────────────────────────
+CATEGORY_COLORS_HEX = {
+    "ECHTER_EINSATZ": "#1e8449",
+    "INTEGRATION":    "#d4ac0d",
+    "BUZZWORD":       "#e67e22",
+    "KEIN_KI":        "#95a5a6",
+    "UNBEKANNT":      "#bdc3c7",
+}
+CATEGORY_LABELS = {
+    "ECHTER_EINSATZ": "✅ Echter Einsatz",
+    "INTEGRATION":    "🔗 Integration",
+    "BUZZWORD":       "⚠️ Buzzword",
+    "KEIN_KI":        "❌ Kein KI-Bezug",
+    "UNBEKANNT":      "❓ Unbekannt",
+}
+
+
+def category_badge(kat):
+    color = CATEGORY_COLORS_HEX.get(kat, "#ccc")
+    label = CATEGORY_LABELS.get(kat, kat)
+    return f'<span style="background:{color};padding:3px 10px;border-radius:12px;color:white;font-size:0.8rem;font-weight:bold;">{label}</span>'
+
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Dashboard
+# ──────────────────────────────────────────────────────────
+if page == "📊 Dashboard":
+    stats = db.get_stats()
+    companies = db.get_all_companies()
+    events = db.get_recent_events(5)
+
+    # KPI-Reihe
+    col1, col2, col3, col4, col5 = st.columns(5)
+    total = stats["total_companies"]
+    by_cat = stats["by_category"]
+
+    with col1:
+        st.metric("Unternehmen gesamt", total)
+    with col2:
+        st.metric("✅ Echter Einsatz", by_cat.get("ECHTER_EINSATZ", 0))
+    with col3:
+        st.metric("🔗 Integration", by_cat.get("INTEGRATION", 0))
+    with col4:
+        st.metric("⚠️ Buzzword", by_cat.get("BUZZWORD", 0))
+    with col5:
+        st.metric("❌ Kein KI", by_cat.get("KEIN_KI", 0))
+
+    st.markdown("---")
+    col_left, col_right = st.columns([2, 1])
+
+    with col_left:
+        st.subheader("🏢 Zuletzt analysierte Unternehmen")
+        if companies:
+            recent = sorted(companies,
+                            key=lambda x: x.get("updated_at", ""),
+                            reverse=True)[:8]
+            for c in recent:
+                with st.container():
+                    c1, c2, c3 = st.columns([3, 2, 1])
+                    with c1:
+                        st.write(f"**{c['name']}**")
+                        st.caption(f"{c.get('city', '')} · {c.get('industry', '')}")
+                    with c2:
+                        kat = c.get("kategorie", "UNBEKANNT")
+                        st.markdown(category_badge(kat), unsafe_allow_html=True)
+                    with c3:
+                        st.write(f"Score: {c.get('vertrauen', '–')}")
+        else:
+            st.info("Noch keine Unternehmen analysiert. Gehe zu **➕ Neu analysieren**.")
+
+    with col_right:
+        st.subheader("📋 Letzte Aktivitäten")
+        if events:
+            for e in events:
+                icon = "🆕" if e["event_type"] == "NEU" else "🔄"
+                st.markdown(f"{icon} **{e.get('company_name', '')}**")
+                st.caption(f"{e['message']} · {e['created_at'][:16]}")
+                st.markdown("---")
+        else:
+            st.info("Keine Aktivitäten")
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Unternehmen
+# ──────────────────────────────────────────────────────────
+elif page == "🏢 Unternehmen":
+    st.header("Unternehmensverzeichnis")
+    companies = db.get_all_companies()
+
+    if not companies:
+        st.info("Noch keine Unternehmen. Füge sie unter **➕ Neu analysieren** hinzu.")
+        st.stop()
+
+    # Filter
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1:
+        search = st.text_input("🔍 Suche", placeholder="Firmenname...")
+    with col_f2:
+        all_cats = ["Alle"] + list(CATEGORY_LABELS.values())
+        cat_filter = st.selectbox("Kategorie", all_cats)
+    with col_f3:
+        industries = ["Alle"] + list({c.get("industry", "") for c in companies if c.get("industry")})
+        ind_filter = st.selectbox("Branche", industries)
+
+    # Filtern
+    filtered = companies
+    if search:
+        filtered = [c for c in filtered if search.lower() in c["name"].lower()]
+    if cat_filter != "Alle":
+        kat_key = {v: k for k, v in CATEGORY_LABELS.items()}.get(cat_filter)
+        if kat_key:
+            filtered = [c for c in filtered if c.get("kategorie") == kat_key]
+    if ind_filter != "Alle":
+        filtered = [c for c in filtered if c.get("industry") == ind_filter]
+
+    st.markdown(f"**{len(filtered)}** Unternehmen gefunden")
+    st.markdown("---")
+
+    for c in filtered:
+        with st.expander(f"🏢 {c['name']} · {CATEGORY_LABELS.get(c.get('kategorie',''), '?')}"):
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                if c.get("biografie"):
+                    st.markdown(f"*{c['biografie']}*")
+                st.markdown(f"**Website:** [{c.get('website','')}]({c.get('website','')})")
+                st.markdown(f"**Adresse:** {c.get('address','')}, {c.get('city','')}")
+                st.markdown(f"**Branche:** {c.get('industry', '–')}")
+
+                ki_apps = c.get("ki_anwendungen", [])
+                if isinstance(ki_apps, str):
+                    try:
+                        ki_apps = json.loads(ki_apps)
+                    except Exception:
+                        ki_apps = []
+                if ki_apps:
+                    st.markdown("**KI-Anwendungen:** " + " · ".join([f"`{a}`" for a in ki_apps]))
+            with col2:
+                kat = c.get("kategorie", "UNBEKANNT")
+                st.markdown(category_badge(kat), unsafe_allow_html=True)
+                st.metric("Vertrauen", f"{c.get('vertrauen', '–')}/100")
+                if c.get("lat") and c.get("lng"):
+                    st.caption(f"📍 {c['lat']:.4f}, {c['lng']:.4f}")
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Karte
+# ──────────────────────────────────────────────────────────
+elif page == "🗺️ Karte":
+    st.header("🗺️ KI-Akteure in der Region")
+    companies = db.get_all_companies()
+
+    geo_companies = [c for c in companies if c.get("lat") and c.get("lng")]
+
+    if not geo_companies:
+        st.warning("Keine Unternehmen mit Koordinaten. Füge Adressen hinzu und analysiere erneut.")
+        st.stop()
+
+    # Karte zentrieren
+    bounds = cfg.get("radar.region_bounds", {})
+    center_lat = (bounds.get("north", 53.7) + bounds.get("south", 53.6)) / 2
+    center_lng = (bounds.get("east", 10.25) + bounds.get("west", 10.1)) / 2
+
+    m = folium.Map(location=[center_lat, center_lng], zoom_start=11,
+                   tiles="CartoDB positron")
+
+    # Marker-Farbe nach Kategorie
+    COLOR_MAP = {
+        "ECHTER_EINSATZ": "green",
+        "INTEGRATION":    "orange",
+        "BUZZWORD":       "red",
+        "KEIN_KI":        "gray",
+        "UNBEKANNT":      "lightgray",
+    }
+
+    for c in geo_companies:
+        kat = c.get("kategorie", "UNBEKANNT")
+        color = COLOR_MAP.get(kat, "blue")
+        ki_apps = c.get("ki_anwendungen", [])
+        if isinstance(ki_apps, str):
+            try:
+                ki_apps = json.loads(ki_apps)
+            except Exception:
+                ki_apps = []
+
+        popup_html = f"""
+        <b>{c['name']}</b><br>
+        {CATEGORY_LABELS.get(kat, kat)}<br>
+        {c.get('city', '')}<br>
+        {'<br>'.join(ki_apps[:3]) if ki_apps else ''}
+        <br><a href="{c.get('website','')}" target="_blank">Website öffnen</a>
+        """
+
+        folium.CircleMarker(
+            location=[c["lat"], c["lng"]],
+            radius=10,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.7,
+            popup=folium.Popup(popup_html, max_width=250),
+            tooltip=c["name"]
+        ).add_to(m)
+
+    # Legende
+    legend_html = """
+    <div style="position: fixed; bottom: 30px; left: 30px; z-index: 1000;
+                background: white; padding: 15px; border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2); font-size: 13px;">
+        <b>Legende</b><br>
+        🟢 Echter KI-Einsatz<br>
+        🟠 KI-Integration<br>
+        🔴 KI-Buzzword<br>
+        ⚫ Kein KI-Bezug
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+    st_folium(m, width=None, height=550, returned_objects=[])
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Unternehmen auf der Karte", len(geo_companies))
+    with col2:
+        st.metric("Davon mit echtem KI-Einsatz",
+                  len([c for c in geo_companies if c.get("kategorie") == "ECHTER_EINSATZ"]))
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Neu analysieren
+# ──────────────────────────────────────────────────────────
+elif page == "➕ Neu analysieren":
+    st.header("➕ Unternehmen hinzufügen & analysieren")
+
+    with st.form("new_company_form"):
+        st.subheader("Unternehmensdaten")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            name = st.text_input("Firmenname *", placeholder="Musterfirma GmbH")
+            website = st.text_input("Website *", placeholder="https://musterfirma.de")
+            industry = st.text_input("Branche", placeholder="IT / Logistik / Handel...")
+        with col2:
+            address = st.text_input("Straße & Hausnummer", placeholder="Hauptstraße 1")
+            postal_code = st.text_input("PLZ", placeholder="23843")
+            city = st.text_input("Stadt", placeholder="Bad Oldesloe")
+            employee_count = st.selectbox("Mitarbeiter",
+                ["–", "1-9", "10-49", "50-249", "250-999", "1000+"])
+
+        col_opt1, col_opt2 = st.columns(2)
+        with col_opt1:
+            do_geo = st.checkbox("Geocodierung (Adresse → Koordinaten)", value=True)
+        with col_opt2:
+            do_bio = st.checkbox("Biografie generieren", value=True)
+
+        submitted = st.form_submit_button("🚀 Analysieren", type="primary")
+
+    if submitted:
+        if not name or not website:
+            st.error("Bitte Firmenname und Website angeben.")
+        elif not os.getenv("OPENAI_API_KEY"):
+            st.error("OpenAI API Key fehlt. Bitte in der Sidebar eingeben.")
+        else:
+            progress = st.progress(0, "Starte Analyse...")
+
+            # 1. Scraping
+            progress.progress(20, "🌐 Website wird gelesen...")
+            scrape_result = scraper.scrape_website(website)
+
+            if scrape_result["error"]:
+                st.warning(f"Scraping-Warnung: {scrape_result['error']}")
+                website_text = f"Firmenname: {name}"
+            else:
+                website_text = scrape_result["text"]
+                st.success(f"✅ {scrape_result['pages_scraped']} Seiten gelesen · "
+                           f"{len(scrape_result['keyword_hits'])} Keyword-Treffer: "
+                           f"{', '.join(scrape_result['keyword_hits'][:5])}")
+
+            # 2. Geocodierung
+            lat, lng = None, None
+            if do_geo and (address or city):
+                progress.progress(40, "📍 Geocodierung...")
+                lat, lng = geo_mapper.geocode_address(address, city, postal_code)
+                if lat:
+                    st.success(f"📍 Koordinaten: {lat:.4f}, {lng:.4f}")
+                else:
+                    st.info("Adresse konnte nicht geocodiert werden.")
+
+            # 3. Company speichern
+            company_id = db.upsert_company(
+                name=name, website=website, address=address,
+                city=city, postal_code=postal_code,
+                lat=lat, lng=lng, industry=industry,
+                employee_count=employee_count
+            )
+
+            # 4. LLM-Analyse
+            progress.progress(60, "🤖 KI-Analyse...")
+            try:
+                classification = analyzer.classify_company(name, website_text)
+
+                biografie = ""
+                if do_bio:
+                    progress.progress(80, "✍️ Biografie wird geschrieben...")
+                    biografie = analyzer.generate_biography(name, website_text, classification)
+
+                db.save_analysis(
+                    company_id=company_id,
+                    kategorie=classification["kategorie"],
+                    begruendung=classification["begruendung"],
+                    ki_anwendungen=classification["ki_anwendungen"],
+                    vertrauen=classification["vertrauen"],
+                    biografie=biografie,
+                    raw_text=website_text[:2000]
+                )
+
+                db.log_event(company_id, "NEU",
+                             f"Analysiert: {classification['kategorie']} (Score: {classification['vertrauen']})")
+
+                progress.progress(100, "✅ Fertig!")
+
+                # Ergebnis anzeigen
+                st.markdown("---")
+                st.subheader("📊 Analyseergebnis")
+
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    st.markdown(f"### {name}")
+                    kat = classification["kategorie"]
+                    st.markdown(category_badge(kat), unsafe_allow_html=True)
+                    st.markdown(f"\n**Begründung:** {classification['begruendung']}")
+
+                    if classification.get("ki_anwendungen"):
+                        st.markdown("**KI-Anwendungen:**")
+                        for app in classification["ki_anwendungen"]:
+                            st.markdown(f"• {app}")
+
+                    if biografie:
+                        st.markdown("---")
+                        st.markdown("**Biografie:**")
+                        st.markdown(f"*{biografie}*")
+
+                with col2:
+                    st.metric("Vertrauens-Score", f"{classification['vertrauen']}/100")
+
+            except Exception as e:
+                st.error(f"LLM-Analyse fehlgeschlagen: {e}")
+                progress.empty()
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Trends
+# ──────────────────────────────────────────────────────────
+elif page == "📈 Trends":
+    st.header("📈 Trend-Analyse")
+
+    companies = db.get_all_companies()
+    analyzed = [c for c in companies if c.get("kategorie")]
+
+    if not analyzed:
+        st.info("Noch zu wenig Daten für eine Trend-Analyse.")
+        st.stop()
+
+    # Verteilungs-Chart
+    st.subheader("Kategorie-Verteilung")
+    stats = db.get_stats()
+    by_cat = stats["by_category"]
+
+    chart_data = pd.DataFrame({
+        "Kategorie": [CATEGORY_LABELS.get(k, k) for k in by_cat.keys()],
+        "Anzahl": list(by_cat.values())
+    })
+    st.bar_chart(chart_data.set_index("Kategorie"))
+
+    # Branchen-Übersicht
+    st.subheader("Branchen-Verteilung")
+    industries = {}
+    for c in analyzed:
+        ind = c.get("industry", "Unbekannt") or "Unbekannt"
+        industries[ind] = industries.get(ind, 0) + 1
+
+    if industries:
+        ind_df = pd.DataFrame(
+            {"Branche": list(industries.keys()), "Anzahl": list(industries.values())}
+        ).sort_values("Anzahl", ascending=False)
+        st.bar_chart(ind_df.set_index("Branche"))
+
+    # LLM-Trend-Report
+    st.subheader("🤖 KI-Trend-Report")
+    existing = db.get_latest_trend_report()
+    if existing:
+        st.info(f"Letzter Report: {existing['created_at'][:16]}")
+        st.markdown(existing["report_text"])
+
+    if st.button("Neuen Trend-Report generieren"):
+        if not os.getenv("OPENAI_API_KEY"):
+            st.error("OpenAI API Key fehlt.")
+        else:
+            with st.spinner("Analysiere Trends..."):
+                report = analyzer.generate_trend_report(analyzed)
+                db.save_trend_report(report, len(analyzed))
+                st.markdown(report)
+                st.success("Report gespeichert!")
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Aktivitätslog
+# ──────────────────────────────────────────────────────────
+elif page == "📋 Aktivitätslog":
+    st.header("📋 Aktivitäts-Log")
+
+    events = db.get_recent_events(100)
+
+    if not events:
+        st.info("Noch keine Aktivitäten")
+    else:
+        # DataFrame
+        df = pd.DataFrame(events)
+        df = df[["created_at", "company_name", "event_type", "message", "alerted"]]
+        df.columns = ["Zeitpunkt", "Unternehmen", "Typ", "Details", "Gemeldet"]
+        df["Gemeldet"] = df["Gemeldet"].map({0: "❌", 1: "✅"})
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+    # Alert-Bereich
+    st.markdown("---")
+    st.subheader("📧 E-Mail-Alert")
+    alert_enabled = cfg.get("radar.alerts.enabled", False)
+
+    if not alert_enabled:
+        st.warning("Alerts sind in der config.yaml deaktiviert.")
+    else:
+        from_email = cfg.get("radar.alerts.from_email", "")
+        to_email = cfg.get("radar.alerts.to_email", "")
+
+        if not from_email or not to_email:
+            st.warning("E-Mail nicht konfiguriert. Bitte `from_email` und `to_email` in config.yaml setzen.")
+        else:
+            st.info(f"Von: {from_email} → An: {to_email}")
+            smtp_password = st.text_input("SMTP-Passwort (Gmail App-Passwort)", type="password")
+
+            if st.button("🔔 Alert jetzt senden"):
+                result = alert.check_and_alert(smtp_password)
+                if result["status"] == "sent":
+                    st.success(f"Alert gesendet: {result['count']} Ereignisse")
+                elif result["status"] == "no_new_events":
+                    st.info("Keine neuen Ereignisse")
+                else:
+                    st.warning(f"Status: {result['status']}")
+
+# ──────────────────────────────────────────────────────────
+# PAGE: PDF-Export
+# ──────────────────────────────────────────────────────────
+elif page == "📄 PDF-Export":
+    st.header("📄 PDF-Steckbriefe exportieren")
+
+    companies = db.get_all_companies()
+    analyzed = [c for c in companies if c.get("kategorie")]
+
+    if not analyzed:
+        st.info("Noch keine analysierten Unternehmen.")
+        st.stop()
+
+    tab1, tab2 = st.tabs(["Einzelner Steckbrief", "Übersichts-PDF"])
+
+    with tab1:
+        company_names = {c["name"]: c["id"] for c in analyzed}
+        selected_name = st.selectbox("Unternehmen wählen", list(company_names.keys()))
+
+        if st.button("📄 Steckbrief generieren"):
+            company_id = company_names[selected_name]
+            company = db.get_company_by_id(company_id)
+            analyses = db.get_analyses_for_company(company_id)
+
+            if not analyses:
+                st.error("Keine Analyse vorhanden.")
+            else:
+                analysis = analyses[0]
+                with st.spinner("PDF wird erstellt..."):
+                    path = pdf_export.generate_company_profile(company, analysis)
+                with open(path, "rb") as f:
+                    st.download_button(
+                        label=f"⬇️ {selected_name} – Steckbrief.pdf",
+                        data=f,
+                        file_name=f"Steckbrief_{selected_name.replace(' ','_')}.pdf",
+                        mime="application/pdf"
+                    )
+
+    with tab2:
+        st.write(f"{len(analyzed)} Unternehmen werden ins Übersichts-PDF aufgenommen.")
+        cat_filter = st.multiselect(
+            "Nur diese Kategorien:",
+            list(CATEGORY_LABELS.values()),
+            default=list(CATEGORY_LABELS.values())
+        )
+
+        if st.button("📊 Übersichts-PDF generieren"):
+            cat_keys = {v: k for k, v in CATEGORY_LABELS.items()}
+            selected_keys = [cat_keys[c] for c in cat_filter if c in cat_keys]
+            filtered = [c for c in analyzed if c.get("kategorie") in selected_keys]
+
+            with st.spinner("PDF wird erstellt..."):
+                path = pdf_export.generate_overview_pdf(filtered)
+            with open(path, "rb") as f:
+                st.download_button(
+                    label="⬇️ Übersicht herunterladen",
+                    data=f,
+                    file_name="Stormarn_KI_Uebersicht.pdf",
+                    mime="application/pdf"
+                )
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Einstellungen
+# ──────────────────────────────────────────────────────────
+elif page == "⚙️ Einstellungen":
+    st.header("⚙️ Konfiguration")
+
+    st.subheader("Aktuelle config.yaml")
+    config_path = "config.yaml"
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            config_content = f.read()
+        st.code(config_content, language="yaml")
+
+        st.info("💡 Um das Thema zu wechseln (z.B. auf 'Wasserstoff'), "
+                "einfach die config.yaml bearbeiten und `streamlit run app.py` neu starten.")
+    else:
+        st.error("config.yaml nicht gefunden.")
+
+    st.markdown("---")
+    st.subheader("🔄 Themen-Presets")
+    st.markdown("""
+Lade eine dieser Beispiel-Konfigurationen um das Radar-Thema zu wechseln:
+
+| Preset | Thema | Region |
+|--------|-------|--------|
+| `config_ki_stormarn.yaml` | Künstliche Intelligenz | Kreis Stormarn |
+| `config_h2_hamburg.yaml` | Wasserstofftechnologie | Hamburg |
+| `config_startup.yaml` | Tech-Startups | Berlin |
+| `config_nachhaltigkeit.yaml` | Nachhaltigkeit | Schleswig-Holstein |
+
+Einfach umbenennen in `config.yaml` und Streamlit neu starten.
+    """)
+
+    st.markdown("---")
+    st.subheader("🗑️ Datenbank zurücksetzen")
+    if st.checkbox("Ich bin sicher, dass ich alle Daten löschen möchte"):
+        if st.button("🗑️ Alle Daten löschen", type="secondary"):
+            db_path = "data/radar.db"
+            if os.path.exists(db_path):
+                os.remove(db_path)
+                db.init_db()
+                st.success("Datenbank zurückgesetzt.")
+            else:
+                st.info("Keine Datenbank gefunden.")
