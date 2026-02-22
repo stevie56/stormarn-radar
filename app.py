@@ -192,16 +192,6 @@ if page == "📊 Dashboard":
         else:
             st.info("Keine Aktivitäten")
 
-        # Tag-Verteilung
-        tag_stats = db.get_tag_stats()
-        if tag_stats:
-            st.subheader("🏷️ Top-Tags")
-            top_tags = dict(list(tag_stats.items())[:8])
-            tag_df = pd.DataFrame(
-                {"Tag": list(top_tags.keys()), "Unternehmen": list(top_tags.values())}
-            )
-            st.bar_chart(tag_df.set_index("Tag"))
-
 # ──────────────────────────────────────────────────────────
 # PAGE: Unternehmen
 # ──────────────────────────────────────────────────────────
@@ -213,7 +203,7 @@ elif page == "🏢 Unternehmen":
         st.info("Noch keine Unternehmen. Füge sie unter **➕ Neu analysieren** hinzu.")
         st.stop()
 
-    # Filter – Zeile 1
+    # Filter
     col_f1, col_f2, col_f3 = st.columns(3)
     with col_f1:
         search = st.text_input("🔍 Suche", placeholder="Firmenname...")
@@ -223,14 +213,6 @@ elif page == "🏢 Unternehmen":
     with col_f3:
         industries = ["Alle"] + list({c.get("industry", "") for c in companies if c.get("industry")})
         ind_filter = st.selectbox("Branche", industries)
-
-    # Filter – Zeile 2: KI-aktiv + Tags
-    col_f4, col_f5 = st.columns([1, 2])
-    with col_f4:
-        ki_aktiv_only = st.checkbox("Nur KI-aktive Unternehmen")
-    with col_f5:
-        available_tags = db.get_all_tags()
-        tag_filter = st.multiselect("Nach Tags filtern", available_tags)
 
     # Filtern
     filtered = companies
@@ -242,16 +224,6 @@ elif page == "🏢 Unternehmen":
             filtered = [c for c in filtered if c.get("kategorie") == kat_key]
     if ind_filter != "Alle":
         filtered = [c for c in filtered if c.get("industry") == ind_filter]
-    if ki_aktiv_only:
-        filtered = [c for c in filtered if c.get("ki_aktiv") == 1]
-    if tag_filter:
-        def _has_tags(c):
-            try:
-                ctags = json.loads(c.get("tags") or "[]")
-            except Exception:
-                ctags = []
-            return any(t in ctags for t in tag_filter)
-        filtered = [c for c in filtered if _has_tags(c)]
 
     st.markdown(f"**{len(filtered)}** Unternehmen gefunden")
     st.markdown("---")
@@ -278,13 +250,6 @@ elif page == "🏢 Unternehmen":
                     sm_links.append(f"[Instagram]({c['instagram']})")
                 if sm_links:
                     st.markdown("**Social Media:** " + " · ".join(sm_links))
-
-                try:
-                    ctags = json.loads(c.get("tags") or "[]")
-                except Exception:
-                    ctags = []
-                if ctags:
-                    st.markdown("**Tags:** " + " ".join(f"`{t}`" for t in ctags))
 
                 ki_apps = c.get("ki_anwendungen", [])
                 if isinstance(ki_apps, str):
@@ -409,15 +374,15 @@ elif page == "➕ Neu analysieren":
                     ["–", "1-9", "10-49", "50-249", "250-999", "1000+"])
 
             st.subheader("Social Media")
-            linkedin = st.text_input("LinkedIn", placeholder="https://linkedin.com/company/...")
-
-            st.subheader("Tags")
-            tags_input = st.text_input(
-                "Branchen-Tags (kommagetrennt)",
-                placeholder="IT, Logistik, Automatisierung...",
-                help="Eigene Tags für Filterung und Visualisierung. "
-                     "Werden nach der Analyse automatisch um erkannte KI-Anwendungen ergänzt."
-            )
+            col_sm1, col_sm2, col_sm3, col_sm4 = st.columns(4)
+            with col_sm1:
+                linkedin = st.text_input("LinkedIn", placeholder="https://linkedin.com/company/...")
+            with col_sm2:
+                xing = st.text_input("XING", placeholder="https://xing.com/pages/...")
+            with col_sm3:
+                twitter = st.text_input("X / Twitter", placeholder="https://x.com/...")
+            with col_sm4:
+                instagram = st.text_input("Instagram", placeholder="https://instagram.com/...")
 
             col_opt1, col_opt2 = st.columns(2)
             with col_opt1:
@@ -448,22 +413,10 @@ elif page == "➕ Neu analysieren":
                                f"{len(scrape_result['keyword_hits'])} Keyword-Treffer: "
                                f"{', '.join(scrape_result['keyword_hits'][:5])}")
 
-                # 1.5. Social-Media-Erkennung
-                progress.progress(35, "🔗 Social-Media-Profile werden erkannt...")
-                detected_sm = scrape_result.get("social_media", {})
-
-                # Manuelle Eingabe hat Vorrang; erkanntes LinkedIn-Profil füllt leeres Feld
-                final_linkedin = linkedin or detected_sm.get("linkedin", "")
-
-                if not linkedin and final_linkedin:
-                    st.info(f"🔗 LinkedIn automatisch erkannt: [{final_linkedin}]({final_linkedin})")
-                elif not scrape_result["error"]:
-                    st.caption("🔗 Kein LinkedIn-Profil auf der Website gefunden.")
-
                 # 2. Geocodierung
                 lat, lng = None, None
                 if do_geo and (address or city):
-                    progress.progress(45, "📍 Geocodierung...")
+                    progress.progress(40, "📍 Geocodierung...")
                     lat, lng = geo_mapper.geocode_address(address, city, postal_code)
                     if lat:
                         st.success(f"📍 Koordinaten: {lat:.4f}, {lng:.4f}")
@@ -476,7 +429,8 @@ elif page == "➕ Neu analysieren":
                     city=city, postal_code=postal_code,
                     lat=lat, lng=lng, industry=industry,
                     employee_count=employee_count,
-                    linkedin=final_linkedin
+                    linkedin=linkedin, xing=xing,
+                    twitter=twitter, instagram=instagram
                 )
 
                 # 4. LLM-Analyse
@@ -501,15 +455,6 @@ elif page == "➕ Neu analysieren":
 
                     db.log_event(company_id, "NEU",
                                  f"Analysiert: {classification['kategorie']} (Score: {classification['vertrauen']})")
-
-                    # Auto-Tags: manuelle + Branche + KI-Anwendungen (dedupliziert)
-                    manual_tags = [t.strip() for t in tags_input.split(",") if t.strip()]
-                    industry_tag = industry.split("/")[0].strip() if industry else ""
-                    ki_tags = [a for a in classification.get("ki_anwendungen", [])[:3]]
-                    combined = ([industry_tag] if industry_tag else []) + ki_tags
-                    final_tags = list(dict.fromkeys(manual_tags + combined))
-                    if final_tags:
-                        db.update_company_tags(company_id, final_tags)
 
                     progress.progress(100, "✅ Fertig!")
 
@@ -536,9 +481,6 @@ elif page == "➕ Neu analysieren":
 
                     with col2:
                         st.metric("Vertrauens-Score", f"{classification['vertrauen']}/100")
-                        if final_tags:
-                            st.markdown("**Tags:**")
-                            st.markdown(" ".join(f"`{t}`" for t in final_tags))
 
                 except Exception as e:
                     st.error(f"LLM-Analyse fehlgeschlagen: {e}")
