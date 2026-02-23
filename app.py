@@ -30,6 +30,30 @@ st.set_page_config(
 # Datenbank initialisieren
 db.init_db()
 
+
+@st.cache_resource
+def _ensure_csv_imported():
+    """Importiert die Adressliste einmalig beim Start (upsert, idempotent)."""
+    csv_path = os.path.join(os.path.dirname(__file__), "data", "unternehmen_stormarn_beispiel.csv")
+    if not os.path.exists(csv_path):
+        return
+    df_csv = pd.read_csv(csv_path, dtype=str).fillna("")
+    for _, row in df_csv.iterrows():
+        _name = (row.get("name") or "").strip()
+        _web  = (row.get("website") or "").strip()
+        if _name and _web:
+            db.upsert_company(
+                name=_name, website=_web,
+                address=row.get("adresse", ""), city=row.get("ort", ""),
+                postal_code=row.get("plz", ""), industry=row.get("branche", ""),
+                employee_count=row.get("mitarbeiter", ""),
+                linkedin=row.get("linkedin", ""), xing=row.get("xing", ""),
+                twitter=row.get("twitter", ""), instagram=row.get("instagram", ""),
+            )
+
+
+_ensure_csv_imported()
+
 # ──────────────────────────────────────────────────────────
 # Styling
 # ──────────────────────────────────────────────────────────
@@ -98,8 +122,8 @@ with st.sidebar:
     page = st.radio(
         "Navigation",
         ["📊 Dashboard", "🏢 Unternehmen", "🗺️ Karte",
-         "➕ Neu analysieren", "📈 Trends", "📋 Aktivitätslog",
-         "📄 PDF-Export", "⚙️ Einstellungen"],
+         "➕ Neu analysieren", "📈 Trends", "🔄 Monitoring",
+         "📋 Aktivitätslog", "📄 PDF-Export", "⚙️ Einstellungen"],
         label_visibility="collapsed"
     )
     st.markdown("---")
@@ -710,6 +734,168 @@ elif page == "📈 Trends":
                 db.save_trend_report(report, len(analyzed))
                 st.markdown(report)
                 st.success("Report gespeichert!")
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Monitoring
+# ──────────────────────────────────────────────────────────
+elif page == "🔄 Monitoring":
+    from datetime import datetime as _dt
+
+    STALE_DAYS = 30
+
+    def _freshness(c):
+        """Gibt (status, tage_alt) zurück: 'aktuell' | 'veraltet' | 'ausstehend'."""
+        at = c.get("analyzed_at")
+        if not at:
+            return "ausstehend", None
+        try:
+            delta = (_dt.now() - _dt.fromisoformat(at)).days
+            return ("aktuell" if delta <= STALE_DAYS else "veraltet"), delta
+        except Exception:
+            return "ausstehend", None
+
+    def _run_analysis(c):
+        """Analysiert ein Unternehmen und speichert das Ergebnis. Gibt classification zurück."""
+        sr = scraper.scrape_website(c["website"])
+        wtext = sr["text"] if not sr["error"] else f"Firmenname: {c['name']}"
+        cl = analyzer.classify_company(c["name"], wtext)
+        old_kat = c.get("kategorie")
+        db.save_analysis(
+            company_id=c["id"],
+            kategorie=cl["kategorie"],
+            begruendung=cl["begruendung"],
+            ki_anwendungen=cl["ki_anwendungen"],
+            vertrauen=cl["vertrauen"],
+            biografie="",
+            raw_text=wtext[:2000],
+        )
+        evt = "ÄNDERUNG" if old_kat and old_kat != cl["kategorie"] else "UPDATE"
+        note = f" · Vorher: {old_kat}" if evt == "ÄNDERUNG" else ""
+        db.log_event(c["id"], evt,
+                     f"Monitoring: {cl['kategorie']} (Score: {cl['vertrauen']}){note}")
+        return cl
+
+    st.header("🔄 KI-Aktivitäts-Monitoring")
+    st.caption(f"Alle Unternehmen aus der Adressliste auf einen Blick · "
+               f"Ampel: 🟢 < {STALE_DAYS} Tage · 🟡 veraltet · 🔴 noch nicht analysiert")
+
+    companies = db.get_all_companies()
+
+    if not companies:
+        st.info("Keine Unternehmen in der Datenbank.")
+        st.stop()
+
+    fresh_list   = [c for c in companies if _freshness(c)[0] == "aktuell"]
+    stale_list   = [c for c in companies if _freshness(c)[0] == "veraltet"]
+    pending_list = [c for c in companies if _freshness(c)[0] == "ausstehend"]
+
+    # ── KPI-Zeile ─────────────────────────────────────────
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1.metric("Unternehmen gesamt", len(companies))
+    kpi2.metric("🟢 Aktuell analysiert", len(fresh_list))
+    kpi3.metric("🟡 Veraltet (>30 Tage)", len(stale_list))
+    kpi4.metric("🔴 Noch ausstehend", len(pending_list))
+
+    st.markdown("---")
+
+    has_api   = bool(os.getenv("OPENAI_API_KEY"))
+    to_update = pending_list + stale_list
+
+    # ── Filter + Bulk-Button ───────────────────────────────
+    col_flt, col_bulk = st.columns([2, 2])
+    with col_flt:
+        status_filter = st.selectbox(
+            "Anzeigen",
+            ["Alle", "🔴 Noch ausstehend", "🟡 Veraltet (>30 Tage)", "🟢 Aktuell analysiert"],
+        )
+    with col_bulk:
+        st.write("")  # vertical align
+        do_bulk = st.button(
+            f"🚀 {len(to_update)} ausstehende / veraltete jetzt analysieren",
+            type="primary",
+            disabled=not has_api or len(to_update) == 0,
+            help="Analysiert alle noch nicht oder veraltet analysierten Unternehmen per KI.",
+        )
+
+    # ── Bulk-Analyse ──────────────────────────────────────
+    if do_bulk:
+        if not has_api:
+            st.error("OpenAI API Key fehlt (Sidebar).")
+        else:
+            bulk_prog = st.progress(0, "Starte Bulk-Analyse…")
+            ok, fail = 0, 0
+            for i, c in enumerate(to_update):
+                pct = int((i + 1) / len(to_update) * 100)
+                bulk_prog.progress(pct, f"Analysiere {c['name']} ({i+1}/{len(to_update)})…")
+                try:
+                    _run_analysis(c)
+                    ok += 1
+                except Exception as exc:
+                    fail += 1
+                    db.log_event(c["id"], "FEHLER",
+                                 f"Monitoring-Analyse fehlgeschlagen: {exc}")
+            bulk_prog.progress(100, "Fertig!")
+            st.success(f"Bulk-Analyse abgeschlossen: **{ok}** aktualisiert"
+                       + (f" · **{fail}** Fehler" if fail else ""))
+            st.rerun()
+
+    st.markdown("---")
+
+    # ── Filteranwendung ───────────────────────────────────
+    display = companies
+    if status_filter == "🔴 Noch ausstehend":
+        display = pending_list
+    elif status_filter == "🟡 Veraltet (>30 Tage)":
+        display = stale_list
+    elif status_filter == "🟢 Aktuell analysiert":
+        display = fresh_list
+
+    if not display:
+        st.info("Keine Unternehmen für diesen Filter.")
+        st.stop()
+
+    # ── Spaltenköpfe ──────────────────────────────────────
+    h1, h2, h3, h4, h5 = st.columns([3, 2, 2, 2, 1])
+    h1.markdown("**Unternehmen**")
+    h2.markdown("**Stadt · Branche**")
+    h3.markdown("**KI-Status**")
+    h4.markdown("**Letzte Analyse**")
+    h5.markdown("**Prüfen**")
+    st.markdown('<hr style="margin:4px 0">', unsafe_allow_html=True)
+
+    # ── Unternehmenszeilen ────────────────────────────────
+    ICON = {"aktuell": "🟢", "veraltet": "🟡", "ausstehend": "🔴"}
+    for c in display:
+        fstatus, delta = _freshness(c)
+        icon = ICON.get(fstatus, "⚪")
+
+        col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
+        with col1:
+            st.write(f"{icon} **{c['name']}**")
+        with col2:
+            st.caption(f"{c.get('city', '–')} · {c.get('industry', '–')}")
+        with col3:
+            if c.get("kategorie"):
+                st.markdown(category_badge(c["kategorie"]), unsafe_allow_html=True)
+            else:
+                st.caption("–")
+        with col4:
+            if c.get("analyzed_at"):
+                st.caption(f"{c['analyzed_at'][:10]}  ({delta}d)")
+            else:
+                st.caption("–")
+        with col5:
+            if st.button("🔄", key=f"mon_{c['id']}",
+                         help=f"{c['name']} jetzt per KI analysieren",
+                         disabled=not has_api):
+                with st.spinner(f"Analysiere {c['name']}…"):
+                    try:
+                        _run_analysis(c)
+                    except Exception as e:
+                        st.error(f"Fehler: {e}")
+                st.rerun()
+
+        st.markdown('<hr style="margin:2px 0;opacity:0.15">', unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────
 # PAGE: Aktivitätslog
