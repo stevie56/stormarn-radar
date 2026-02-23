@@ -17,6 +17,8 @@ import geo_mapper
 import alert
 import pdf_export
 import bulk_analyzer
+import company_finder
+import wirtschaftsdaten_importer
 
 # ──────────────────────────────────────────────────────────
 # Seitenkonfiguration
@@ -99,8 +101,8 @@ with st.sidebar:
     page = st.radio(
         "Navigation",
         ["📊 Dashboard", "🏢 Unternehmen", "🗺️ Karte",
-         "➕ Neu analysieren", "📤 Excel-Import", "📈 Trends", "📋 Aktivitätslog",
-         "📄 PDF-Export", "⚙️ Einstellungen"],
+         "➕ Neu analysieren", "📤 Excel-Import", "📊 Wirtschaftsdaten", "🔍 Auto-Suche",
+         "📈 Trends", "📋 Aktivitätslog", "📄 PDF-Export", "⚙️ Einstellungen"],
         label_visibility="collapsed"
     )
     st.markdown("---")
@@ -588,6 +590,230 @@ elif page == "📤 Excel-Import":
                         st.markdown("**Fehler:**")
                         for e in errors:
                             st.error(f"{e['name']}: {e['error']}")
+
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Wirtschaftsdaten
+# ──────────────────────────────────────────────────────────
+elif page == "📊 Wirtschaftsdaten":
+    st.header("📊 Wirtschaftsdaten Stormarn – 8.838 Unternehmen")
+    st.markdown("Lade die offizielle Wirtschaftsdaten-Excel hoch und importiere alle Stormarn-Firmen direkt ins Radar.")
+
+    uploaded = st.file_uploader(
+        "Wirtschaftsdaten_Stormarn.xlsx hochladen",
+        type=["xlsx"],
+        help="Die Excel-Datei mit allen Stormarn-Unternehmen"
+    )
+
+    if uploaded:
+        with st.spinner("Datei wird gelesen..."):
+            df, error = wirtschaftsdaten_importer.load_wirtschaftsdaten(uploaded.read())
+
+        if error:
+            st.error(f"Fehler: {error}")
+        else:
+            stats = wirtschaftsdaten_importer.get_stats(df)
+
+            # Statistiken
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("🏢 Unternehmen gesamt", f"{stats['total']:,}")
+            with col2:
+                st.metric("🌐 Mit Website", f"{stats['with_website']:,}")
+            with col3:
+                st.metric("📍 Ohne Website", f"{stats['without_website']:,}")
+
+            st.markdown("---")
+
+            # Filter
+            st.subheader("🔧 Filter")
+            col4, col5 = st.columns(2)
+            with col4:
+                only_web = st.checkbox("Nur Firmen mit Website", value=True)
+                selected_cities = st.multiselect(
+                    "Städte filtern",
+                    list(stats["cities"].keys()),
+                    default=[]
+                )
+            with col5:
+                st.markdown("**Top Branchen:**")
+                for b, count in list(stats["top_branches"].items())[:5]:
+                    st.text(f"• {b[:50]}: {count}")
+
+            # Gefilterte Daten
+            filtered = wirtschaftsdaten_importer.filter_companies(
+                df,
+                only_with_website=only_web,
+                cities=selected_cities if selected_cities else None
+            )
+
+            st.info(f"📋 **{len(filtered):,} Unternehmen** nach Filter")
+            st.dataframe(
+                filtered[["name", "ort", "website", "branche", "mitarbeiter"]].head(100),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            if len(filtered) > 100:
+                st.caption(f"Zeige erste 100 von {len(filtered):,} Unternehmen")
+
+            st.markdown("---")
+            st.subheader("🚀 Import & Analyse")
+
+            col6, col7 = st.columns(2)
+            with col6:
+                do_import = st.button("💾 Alle in Datenbank speichern", type="secondary")
+            with col7:
+                do_analyze = st.button("🤖 Direkt KI-Analyse starten", type="primary",
+                                       help="Analysiert alle Firmen MIT Website")
+
+            if do_import:
+                progress = st.progress(0)
+                saved = 0
+                for i, row in filtered.iterrows():
+                    try:
+                        db.upsert_company(
+                            name=row["name"],
+                            website=row.get("website", ""),
+                            address=row.get("adresse", ""),
+                            city=row.get("ort", ""),
+                            postal_code=row.get("plz", ""),
+                            industry=row.get("branche", ""),
+                            employee_count=str(row.get("mitarbeiter", ""))
+                        )
+                        saved += 1
+                        if saved % 100 == 0:
+                            progress.progress(saved / len(filtered))
+                    except Exception:
+                        continue
+                progress.progress(1.0)
+                st.success(f"✅ {saved:,} Unternehmen gespeichert!")
+                db.log_event(None, "WIRTSCHAFTSDATEN_IMPORT",
+                            f"{saved} Firmen aus Wirtschaftsdaten importiert")
+
+            if do_analyze:
+                if not os.getenv("OPENAI_API_KEY"):
+                    st.error("OpenAI API Key fehlt!")
+                else:
+                    with_web = filtered[filtered["website"] != ""].copy()
+                    st.info(f"Analysiere {len(with_web):,} Firmen mit Website...")
+
+                    # In bulk_analyzer Format bringen
+                    analyze_df = pd.DataFrame({
+                        "Firmenname*": with_web["name"].values,
+                        "Website*": with_web["website"].values,
+                        "Straße": with_web["adresse"].values,
+                        "PLZ": with_web["plz"].values,
+                        "Stadt": with_web["ort"].values,
+                        "Branche": with_web["branche"].values,
+                        "Mitarbeiter": with_web["mitarbeiter"].values,
+                        "Notizen": ""
+                    })
+
+                    ana_progress = st.progress(0)
+                    ana_status = st.empty()
+
+                    def ana_cb(current, total, message):
+                        ana_progress.progress(current / total)
+                        ana_status.text(message)
+
+                    results = bulk_analyzer.analyze_batch(
+                        analyze_df,
+                        progress_callback=ana_cb,
+                        do_geo=True
+                    )
+                    success = [r for r in results if r["status"] == "success"]
+                    st.success(f"✅ {len(success):,} Firmen analysiert!")
+
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Auto-Suche
+# ──────────────────────────────────────────────────────────
+elif page == "🔍 Auto-Suche":
+    st.header("🔍 Automatische Firmen-Suche in Stormarn")
+    st.markdown("Sucht automatisch Firmen aus Gelbe Seiten, Handelsregister und Wer-zu-Wem.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Quellen")
+        use_gelbe = st.checkbox("Gelbe Seiten", value=True)
+        use_wer_zu_wem = st.checkbox("Wer-zu-Wem", value=True)
+        use_handelsregister = st.checkbox("Handelsregister", value=False,
+                                          help="Langsamer aber offiziell")
+
+    with col2:
+        st.subheader("Städte")
+        all_cities = company_finder.STORMARN_CITIES
+        selected_cities = st.multiselect(
+            "Städte auswählen",
+            all_cities,
+            default=all_cities[:5]
+        )
+
+    st.markdown("---")
+    col3, col4 = st.columns(2)
+    with col3:
+        auto_analyze = st.checkbox("Direkt KI-Analyse starten", value=False)
+    with col4:
+        do_geo = st.checkbox("Geocodierung", value=True)
+
+    if selected_cities:
+        est_time = len(selected_cities) * 3
+        st.info(f"⏱️ Geschätzte Zeit: ca. {est_time} Minuten")
+
+        if st.button("🚀 Suche starten", type="primary"):
+            sources = []
+            if use_gelbe: sources.append("gelbe_seiten")
+            if use_wer_zu_wem: sources.append("wer_zu_wem")
+            if use_handelsregister: sources.append("handelsregister")
+
+            if not sources:
+                st.error("Bitte mindestens eine Quelle auswählen.")
+                st.stop()
+
+            status = st.empty()
+            progress_bar = st.progress(0)
+            total_steps = len(selected_cities) * len(sources)
+            step = [0]
+
+            def update_status(message):
+                step[0] += 1
+                progress_bar.progress(min(step[0] / total_steps, 1.0))
+                status.text(message)
+
+            with st.spinner("Suche läuft..."):
+                found = company_finder.find_companies_in_stormarn(
+                    cities=selected_cities,
+                    sources=sources,
+                    progress_callback=update_status
+                )
+
+            progress_bar.progress(1.0)
+            status.text(f"✅ {len(found)} Firmen gefunden!")
+
+            if found:
+                st.markdown("---")
+                st.subheader(f"📋 {len(found)} gefundene Firmen")
+                found_df = pd.DataFrame(found)
+                display_cols = [c for c in ["name", "city", "website", "source"] if c in found_df.columns]
+                st.dataframe(found_df[display_cols], use_container_width=True, hide_index=True)
+
+                if st.button("💾 Alle in Datenbank speichern"):
+                    saved = 0
+                    for c in found:
+                        try:
+                            db.upsert_company(
+                                name=c["name"], website=c.get("website", ""),
+                                address=c.get("address", ""), city=c.get("city", ""),
+                                postal_code=c.get("postal_code", "")
+                            )
+                            saved += 1
+                        except Exception:
+                            continue
+                    st.success(f"✅ {saved} Firmen gespeichert!")
+            else:
+                st.warning("Keine Firmen gefunden. Versuche andere Städte oder Quellen.")
 
 
 # ──────────────────────────────────────────────────────────
