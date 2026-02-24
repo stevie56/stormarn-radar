@@ -19,6 +19,10 @@ import pdf_export
 import bulk_analyzer
 import company_finder
 import wirtschaftsdaten_importer
+import ki_scorer
+import news_monitor
+import regional_compare
+import report_generator
 
 # ──────────────────────────────────────────────────────────
 # Seitenkonfiguration
@@ -101,8 +105,10 @@ with st.sidebar:
     page = st.radio(
         "Navigation",
         ["📊 Dashboard", "🏢 Unternehmen", "🗺️ Karte",
-         "➕ Neu analysieren", "📤 Excel-Import", "📊 Wirtschaftsdaten", "🔍 Auto-Suche",
-         "📈 Trends", "📋 Aktivitätslog", "📄 PDF-Export", "⚙️ Einstellungen"],
+         "➕ Neu analysieren", "📤 Excel-Import", "📊 Wirtschaftsdaten",
+         "🔍 Auto-Suche", "📰 News-Monitor", "🏅 KI-Ranking",
+         "📈 Trends", "🌍 Regionalvergleich", "📋 Aktivitätslog",
+         "📄 PDF-Export", "📑 IHK-Bericht", "⚙️ Einstellungen"],
         label_visibility="collapsed"
     )
     st.markdown("---")
@@ -816,9 +822,223 @@ elif page == "🔍 Auto-Suche":
                 st.warning("Keine Firmen gefunden. Versuche andere Städte oder Quellen.")
 
 
+
+# ──────────────────────────────────────────────────────────
+# PAGE: KI-Ranking
+# ──────────────────────────────────────────────────────────
+elif page == "🏅 KI-Ranking":
+    st.header("🏅 KI-Reifegrad Ranking")
+    st.markdown("Alle analysierten Stormarn-Unternehmen nach KI-Score (1–10) bewertet.")
+
+    companies = db.get_all_companies()
+    analyzed = [c for c in companies if c.get("kategorie")]
+
+    if not analyzed:
+        st.info("Noch keine Unternehmen analysiert.")
+    else:
+        # Scores berechnen
+        scored = []
+        for c in analyzed:
+            score_data = ki_scorer.calculate_ki_score(
+                kategorie=c.get("kategorie", "KEIN_KI"),
+                vertrauen=c.get("vertrauen", 50),
+                ki_anwendungen=c.get("ki_anwendungen", []),
+                raw_text=c.get("raw_text", "")
+            )
+            scored.append({**c, **score_data})
+
+        scored = sorted(scored, key=lambda x: x["score"], reverse=True)
+
+        # Top 3 Podium
+        st.subheader("🏆 Top 3 KI-Vorreiter")
+        top3 = scored[:3]
+        cols = st.columns(3)
+        medals = ["🥇", "🥈", "🥉"]
+        for i, (col, firm) in enumerate(zip(cols, top3)):
+            with col:
+                st.metric(
+                    f"{medals[i]} {firm['name'][:20]}",
+                    f"{firm['badge']} {firm['score']}/10",
+                    firm["level"]
+                )
+
+        st.markdown("---")
+
+        # Vollständiges Ranking
+        st.subheader("📋 Vollständiges Ranking")
+
+        score_filter = st.slider("Mindest-Score", 1, 10, 1)
+        filtered = [c for c in scored if c["score"] >= score_filter]
+
+        for rank, firm in enumerate(filtered, 1):
+            with st.expander(f"#{rank} {firm['badge']} {firm['name']} – Score: {firm['score']}/10 · {firm['level']}"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("KI-Score", f"{firm['score']}/10")
+                with col2:
+                    st.metric("Kategorie", firm.get("kategorie", "").replace("_", " "))
+                with col3:
+                    st.metric("Vertrauen", f"{firm.get('vertrauen', 0)}%")
+                st.caption(firm.get("erklaerung", ""))
+                if firm.get("website"):
+                    st.markdown(f"🌐 [{firm['website']}]({firm['website']})")
+
+
+# ──────────────────────────────────────────────────────────
+# PAGE: News-Monitor
+# ──────────────────────────────────────────────────────────
+elif page == "📰 News-Monitor":
+    st.header("📰 News-Monitor")
+    st.markdown("Aktuelle KI-News aus Stormarn und von deinen analysierten Unternehmen.")
+
+    tab1, tab2 = st.tabs(["🌍 Stormarn KI-News", "🏢 Unternehmens-News"])
+
+    with tab1:
+        if st.button("🔄 News laden"):
+            with st.spinner("Suche aktuelle News..."):
+                news = news_monitor.search_stormarn_ki_news()
+
+            if news:
+                for item in news:
+                    with st.container():
+                        st.markdown(f"**[{item['title']}]({item['link']})**")
+                        st.caption(f"📅 {item.get('published', '')} · {item.get('source', '')}")
+                        st.markdown("---")
+            else:
+                st.info("Keine aktuellen News gefunden.")
+
+    with tab2:
+        companies = db.get_all_companies()
+        analyzed = [c for c in companies if c.get("kategorie") == "ECHTER_EINSATZ"]
+
+        if not analyzed:
+            st.info("Erst Unternehmen analysieren um deren News zu sehen.")
+        else:
+            selected = st.selectbox(
+                "Unternehmen auswählen",
+                [c["name"] for c in analyzed[:20]]
+            )
+
+            if st.button("🔍 News suchen"):
+                with st.spinner(f"Suche News für {selected}..."):
+                    news = news_monitor.search_company_news(selected)
+
+                if news:
+                    for item in news:
+                        st.markdown(f"**[{item['title']}]({item['link']})**")
+                        ki_badge = "🤖 KI-relevant" if item.get("ki_relevant") else ""
+                        st.caption(f"📅 {item.get('published', '')} · {item.get('source', '')} {ki_badge}")
+                        st.markdown("---")
+                else:
+                    st.info("Keine News gefunden.")
+
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Regionalvergleich
+# ──────────────────────────────────────────────────────────
+elif page == "🌍 Regionalvergleich":
+    st.header("🌍 Regionalvergleich – Stormarn vs. Schleswig-Holstein")
+
+    companies = db.get_all_companies()
+    analyzed = [c for c in companies if c.get("kategorie")]
+    ki_quote = regional_compare.get_stormarn_ki_quote(analyzed)
+
+    compare_data = regional_compare.get_comparison_data(
+        actual_ki_quote=ki_quote if analyzed else None
+    )
+
+    metric = st.selectbox(
+        "Vergleichskriterium",
+        ["ki_quote_est", "digitalquote", "breitband", "startup_index"],
+        format_func=lambda x: {
+            "ki_quote_est": "KI-Quote (%)",
+            "digitalquote": "Digitalisierungsquote (%)",
+            "breitband": "Breitbandversorgung (%)",
+            "startup_index": "Startup-Index (0-100)"
+        }[x]
+    )
+
+    ranking = regional_compare.get_ranking(metric, compare_data)
+    position = regional_compare.get_stormarn_position(metric, compare_data)
+
+    # Position anzeigen
+    st.metric(
+        f"Stormarn Platz",
+        f"{position['position']} von {position['total']}",
+        f"Besser als {position['besser_als']} Kreise"
+    )
+
+    if analyzed:
+        st.success(f"🎯 Echte KI-Quote aus {len(analyzed)} analysierten Firmen: **{ki_quote}%**")
+
+    st.markdown("---")
+    st.subheader("📊 Ranking")
+
+    for i, (kreis, wert) in enumerate(ranking, 1):
+        farbe = compare_data[kreis].get("farbe", "#3498DB")
+        is_stormarn = kreis == "Kreis Stormarn"
+        prefix = "👉 " if is_stormarn else ""
+        bold_start = "**" if is_stormarn else ""
+        bold_end = "**" if is_stormarn else ""
+        st.markdown(f"{prefix}{i}. {bold_start}{kreis}{bold_end}: **{wert}{'%' if 'quote' in metric or metric == 'breitband' else ''}**")
+
+
+# ──────────────────────────────────────────────────────────
+# PAGE: IHK-Bericht
+# ──────────────────────────────────────────────────────────
+elif page == "📑 IHK-Bericht":
+    st.header("📑 IHK-Bericht erstellen")
+    st.markdown("Erstelle einen professionellen PDF-Bericht für die IHK oder Kreisverwaltung.")
+
+    companies = db.get_all_companies()
+    analyzed = [c for c in companies if c.get("kategorie")]
+
+    if not analyzed:
+        st.warning("Noch keine Unternehmen analysiert. Bitte erst Firmen analysieren.")
+    else:
+        echter = len([c for c in analyzed if c.get("kategorie") == "ECHTER_EINSATZ"])
+        integration = len([c for c in analyzed if c.get("kategorie") == "INTEGRATION"])
+        kein_ki = len([c for c in analyzed if c.get("kategorie") == "KEIN_KI"])
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1: st.metric("Analysiert", len(analyzed))
+        with col2: st.metric("✅ Echter Einsatz", echter)
+        with col3: st.metric("🔗 Integration", integration)
+        with col4: st.metric("❌ Kein KI", kein_ki)
+
+        st.markdown("---")
+
+        report_title = st.text_input(
+            "Berichtstitel",
+            value=f"KI-Radar Kreis Stormarn – {datetime.now().strftime('%B %Y')}"
+        )
+
+        if st.button("📄 PDF-Bericht erstellen", type="primary"):
+            with st.spinner("Bericht wird erstellt..."):
+                stats = {
+                    "total": len(companies),
+                    "analyzed": len(analyzed),
+                    "echter_einsatz": echter,
+                    "integration": integration,
+                    "kein_ki": kein_ki
+                }
+                pdf_bytes = report_generator.generate_ihk_report(
+                    companies=analyzed,
+                    stats=stats,
+                    title=report_title
+                )
+
+            st.download_button(
+                label="⬇️ IHK-Bericht herunterladen",
+                data=pdf_bytes,
+                file_name=f"Stormarn_KI_Radar_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf"
+            )
+            st.success("✅ Bericht fertig!")
+
+
 # ──────────────────────────────────────────────────────────
 # ──────────────────────────────────────────────────────────
-elif page == "📈 Trends":
     st.header("📈 Trend-Analyse")
 
     companies = db.get_all_companies()
