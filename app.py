@@ -23,6 +23,9 @@ import ki_scorer
 import news_monitor
 import regional_compare
 import report_generator
+import job_radar
+import reanalyzer
+import weekly_report
 
 # ──────────────────────────────────────────────────────────
 # Seitenkonfiguration
@@ -106,9 +109,10 @@ with st.sidebar:
         "Navigation",
         ["📊 Dashboard", "🏢 Unternehmen", "🗺️ Karte",
          "➕ Neu analysieren", "📤 Excel-Import", "📊 Wirtschaftsdaten",
-         "🔍 Auto-Suche", "📰 News-Monitor", "🏅 KI-Ranking",
-         "📈 Trends", "🌍 Regionalvergleich", "📋 Aktivitätslog",
-         "📄 PDF-Export", "📑 IHK-Bericht", "⚙️ Einstellungen"],
+         "🔍 Auto-Suche", "💼 Job-Radar", "📰 News-Monitor",
+         "🏅 KI-Ranking", "📈 Trends", "🌍 Regionalvergleich",
+         "🔬 Qualitäts-Check", "📋 Aktivitätslog", "📄 PDF-Export", "📑 IHK-Bericht",
+         "📧 Wochenbericht", "⚙️ Einstellungen"],
         label_visibility="collapsed"
     )
     st.markdown("---")
@@ -1038,6 +1042,289 @@ elif page == "📑 IHK-Bericht":
 
 
 # ──────────────────────────────────────────────────────────
+# PAGE: Job-Radar
+# ──────────────────────────────────────────────────────────
+elif page == "💼 Job-Radar":
+    st.header("💼 Job-Radar – KI-Stellenanzeigen als Indikator")
+    st.markdown("KI-Stellenanzeigen sind der stärkste Beweis für echten KI-Einsatz in einem Unternehmen.")
+
+    tab1, tab2 = st.tabs(["🔍 Einzelne Firma analysieren", "📊 Alle KI-Firmen prüfen"])
+
+    with tab1:
+        companies = db.get_all_companies()
+        company_names = [c["name"] for c in companies if c.get("name")]
+
+        if company_names:
+            selected = st.selectbox("Unternehmen auswählen", company_names)
+            sel_company = next((c for c in companies if c["name"] == selected), {})
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.text_input("Website", value=sel_company.get("website", ""), key="job_website")
+            with col2:
+                st.text_input("Firmenname", value=selected, key="job_name")
+
+            if st.button("🔍 KI-Jobs suchen", type="primary"):
+                website = st.session_state.get("job_website", sel_company.get("website", ""))
+                with st.spinner(f"Suche KI-Stellenanzeigen für {selected}..."):
+                    result = job_radar.analyze_company_jobs(selected, website)
+
+                st.markdown("---")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("KI-Jobs gefunden", result["ki_job_count"])
+                with col2:
+                    st.metric("Max. KI-Score", f"{result['ki_job_score']}/10")
+                with col3:
+                    st.metric("Signal", "✅ Ja" if result["has_ki_jobs"] else "❌ Nein")
+
+                st.info(result["signal_strength"])
+
+                if result["jobs"]:
+                    st.subheader("Gefundene KI-Stellen:")
+                    for job in result["jobs"]:
+                        with st.expander(f"💼 {job['title']} (Score: {job['ki_score']}/10)"):
+                            st.markdown(f"**Quelle:** {job['source']}")
+                            if job.get("link"):
+                                st.markdown(f"**Link:** [{job['link']}]({job['link']})")
+                            st.markdown(f"**KI-Signal:** `{job.get('ki_signal', '')}`")
+                else:
+                    st.info("Keine KI-Stellenanzeigen gefunden. Das bedeutet nicht zwingend kein KI-Einsatz!")
+        else:
+            st.info("Erst Unternehmen in die Datenbank importieren.")
+
+    with tab2:
+        st.markdown("Prüft alle analysierten KI-Firmen auf Stellenanzeigen – als Qualitätsprüfung.")
+        ki_companies = [c for c in db.get_all_companies()
+                        if c.get("kategorie") in ("ECHTER_EINSATZ", "INTEGRATION")]
+
+        st.info(f"**{len(ki_companies)}** KI-Firmen können geprüft werden.")
+        st.warning("⚠️ Das dauert ca. 2 Minuten pro Firma. Wähle eine kleine Gruppe!")
+
+        max_check = st.slider("Maximale Anzahl prüfen", 1, min(20, len(ki_companies)), 5)
+
+        if st.button("🚀 Job-Check starten"):
+            progress = st.progress(0)
+            results = []
+
+            for i, comp in enumerate(ki_companies[:max_check]):
+                progress.progress((i + 1) / max_check)
+                result = job_radar.analyze_company_jobs(
+                    comp["name"], comp.get("website", "")
+                )
+                results.append({**comp, "job_result": result})
+
+            progress.progress(1.0)
+
+            with_jobs = [r for r in results if r["job_result"]["has_ki_jobs"]]
+            st.success(f"✅ {len(with_jobs)} von {len(results)} Firmen haben KI-Stellenanzeigen!")
+
+            for r in results:
+                jr = r["job_result"]
+                icon = "✅" if jr["has_ki_jobs"] else "❌"
+                st.markdown(
+                    f"{icon} **{r['name']}** – {jr['ki_job_count']} KI-Jobs · "
+                    f"Score: {jr['ki_job_score']}/10 · {jr['signal_strength']}"
+                )
+
+
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Re-Analyse
+# ──────────────────────────────────────────────────────────
+elif page == "🔄 Re-Analyse":
+    st.header("🔄 Qualitäts-Verbesserung & Auto-Refresh")
+    st.markdown("Verbessert die Analyse-Qualität durch tieferes Scanning und aktualisiert veraltete Ergebnisse.")
+
+    # Statistiken
+    refresh_stats = reanalyzer.get_refresh_stats()
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Analysiert gesamt", refresh_stats["total_analyzed"])
+    with col2:
+        st.metric("⚠️ Unsichere Ergebnisse", refresh_stats["uncertain_count"],
+                  help=f"Vertrauen unter {reanalyzer.LOW_CONFIDENCE_THRESHOLD}%")
+    with col3:
+        st.metric("⏰ Veraltete Analysen", refresh_stats["stale_count"],
+                  help=f"Älter als {reanalyzer.REFRESH_DAYS} Tage")
+    with col4:
+        st.metric("🔄 Brauchen Review", refresh_stats["needs_review"])
+
+    st.markdown("---")
+
+    tab1, tab2, tab3 = st.tabs(["⚠️ Unsichere re-analysieren",
+                                 "⏰ Veraltete aktualisieren",
+                                 "🎯 Einzelne Firma"])
+
+    with tab1:
+        st.subheader("Unsichere Ergebnisse verbessern")
+        st.markdown(f"Firmen mit Vertrauen unter **{reanalyzer.LOW_CONFIDENCE_THRESHOLD}%** werden tiefer gescannt.")
+
+        threshold = st.slider("Vertrauen-Schwellwert (%)", 30, 80,
+                               reanalyzer.LOW_CONFIDENCE_THRESHOLD)
+        uncertain = reanalyzer.get_uncertain_companies(threshold)
+
+        if uncertain:
+            st.info(f"**{len(uncertain)}** Firmen werden neu analysiert – "
+                    f"ca. {len(uncertain) * 20} Sekunden")
+
+            if st.button("🚀 Re-Analyse starten", type="primary", key="reanalyze_uncertain"):
+                progress = st.progress(0)
+                status = st.empty()
+                results_placeholder = st.empty()
+
+                def cb(current, total, msg):
+                    progress.progress(current / total)
+                    status.text(msg)
+
+                results = reanalyzer.run_reanalysis_batch(uncertain, cb)
+
+                progress.progress(1.0)
+                changed = [r for r in results if r.get("changed")]
+                improved = [r for r in results if r.get("improved")]
+                errors = [r for r in results if r.get("error")]
+
+                st.success(f"✅ {len(results)} Firmen re-analysiert!")
+                col1, col2, col3 = st.columns(3)
+                with col1: st.metric("Verändert", len(changed))
+                with col2: st.metric("Verbessert", len(improved))
+                with col3: st.metric("Fehler", len(errors))
+
+                if changed:
+                    st.subheader("🔄 Veränderte Klassifizierungen:")
+                    for r in changed:
+                        old_k = r.get("old_kategorie", "?")
+                        new_k = r.get("new_kategorie", "?")
+                        st.markdown(
+                            f"**{r['company']}**: "
+                            f"`{old_k}` ({r.get('old_vertrauen',0)}%) → "
+                            f"`{new_k}` ({r.get('new_vertrauen',0)}%)"
+                        )
+        else:
+            st.success("✅ Alle Analysen haben ausreichendes Vertrauen!")
+
+    with tab2:
+        st.subheader("Veraltete Analysen aktualisieren")
+        days = st.slider("Analysen älter als X Tage", 7, 90, reanalyzer.REFRESH_DAYS)
+        stale = reanalyzer.get_stale_companies(days)
+
+        if stale:
+            st.info(f"**{len(stale)}** Firmen seit über {days} Tagen nicht analysiert")
+            max_refresh = st.slider("Maximal aktualisieren", 1,
+                                    min(50, len(stale)), min(10, len(stale)))
+
+            if st.button("🔄 Aktualisierung starten", type="primary", key="refresh_stale"):
+                progress = st.progress(0)
+                status = st.empty()
+
+                def cb2(current, total, msg):
+                    progress.progress(current / total)
+                    status.text(msg)
+
+                results = reanalyzer.run_reanalysis_batch(stale[:max_refresh], cb2)
+                progress.progress(1.0)
+                changed = [r for r in results if r.get("changed")]
+                st.success(f"✅ {len(results)} Firmen aktualisiert, {len(changed)} verändert!")
+        else:
+            st.success(f"✅ Alle Analysen sind aktuell (jünger als {days} Tage)!")
+
+    with tab3:
+        st.subheader("Einzelne Firma neu analysieren")
+        companies = db.get_all_companies()
+        company_names = [c["name"] for c in companies if c.get("website")]
+
+        if company_names:
+            selected_name = st.selectbox("Firma auswählen", company_names)
+            sel = next((c for c in companies if c["name"] == selected_name), None)
+
+            if sel:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Aktuell", sel.get("kategorie", "Nicht analysiert"))
+                with col2:
+                    st.metric("Vertrauen", f"{sel.get('vertrauen', 0)}%")
+
+                deep_scan = st.checkbox("Tiefes Scanning (mehr Unterseiten)", value=True)
+
+                if st.button("🔍 Jetzt re-analysieren", type="primary"):
+                    with st.spinner(f"Analysiere {selected_name} tief..."):
+                        result = reanalyzer.reanalyze_company(sel, deep=deep_scan)
+
+                    if result.get("error"):
+                        st.error(f"Fehler: {result['error']}")
+                    else:
+                        if result["changed"]:
+                            st.warning(
+                                f"⚠️ Klassifizierung geändert: "
+                                f"`{result['old_kategorie']}` → `{result['new_kategorie']}`"
+                            )
+                        else:
+                            st.success(
+                                f"✅ Bestätigt: `{result['new_kategorie']}` "
+                                f"({result['new_vertrauen']}% Vertrauen)"
+                            )
+
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Altes Vertrauen", f"{result['old_vertrauen']}%")
+                        with col2:
+                            delta = result['new_vertrauen'] - result['old_vertrauen']
+                            st.metric("Neues Vertrauen", f"{result['new_vertrauen']}%",
+                                     delta=f"{delta:+d}%")
+
+
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Wochenbericht
+# ──────────────────────────────────────────────────────────
+elif page == "📧 Wochenbericht":
+    st.header("📧 Automatischer Wochenbericht")
+    st.markdown("Jeden Montag automatisch einen Bericht per E-Mail erhalten.")
+
+    tab1, tab2 = st.tabs(["📬 Bericht senden", "👁️ Vorschau"])
+
+    with tab1:
+        st.subheader("E-Mail Konfiguration")
+
+        smtp_configured = bool(os.getenv("SMTP_USER") or os.getenv("SMTP_PASSWORD"))
+
+        if not smtp_configured:
+            st.warning("⚠️ SMTP noch nicht konfiguriert. Gehe zu **Einstellungen** → E-Mail Alerts.")
+            st.info("Füge in Streamlit Secrets ein:\n```\nSMTP_USER = 'deine@gmail.com'\nSMTP_PASSWORD = 'app-passwort'\nREPORT_EMAIL = 'empfaenger@example.com'\n```")
+        else:
+            st.success("✅ SMTP konfiguriert")
+
+        recipient = st.text_input(
+            "Empfänger-E-Mail",
+            value=os.getenv("REPORT_EMAIL", ""),
+            placeholder="empfaenger@example.com"
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📤 Bericht jetzt senden", type="primary"):
+                if not recipient:
+                    st.error("Bitte Empfänger-E-Mail eingeben!")
+                else:
+                    with st.spinner("Bericht wird gesendet..."):
+                        result = weekly_report.send_weekly_report(recipient)
+
+                    if result["success"]:
+                        st.success(f"✅ {result['message']}")
+                    else:
+                        st.error(f"❌ {result['message']}")
+        with col2:
+            st.info("💡 Für automatischen Montags-Versand: Nutze einen Cron-Job oder Scheduler")
+
+    with tab2:
+        st.subheader("Berichts-Vorschau")
+        if st.button("🔄 Vorschau generieren"):
+            with st.spinner("Generiere Vorschau..."):
+                html_preview = weekly_report.get_report_preview()
+            st.components.v1.html(html_preview, height=800, scrolling=True)
+
+
+# ──────────────────────────────────────────────────────────
 # ──────────────────────────────────────────────────────────
     st.header("📈 Trend-Analyse")
 
@@ -1088,6 +1375,174 @@ elif page == "📑 IHK-Bericht":
                 db.save_trend_report(report, len(analyzed))
                 st.markdown(report)
                 st.success("Report gespeichert!")
+
+
+# ──────────────────────────────────────────────────────────
+# PAGE: Qualitäts-Check
+# ──────────────────────────────────────────────────────────
+elif page == "🔬 Qualitäts-Check":
+    st.header("🔬 Qualitäts-Check & Re-Analyse")
+    st.markdown("Verbessert die Analysequalität durch Tiefenscans und hält Daten aktuell.")
+
+    companies = db.get_all_companies()
+    stats = reanalyzer.get_freshness_stats(companies)
+
+    # Übersicht
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("🏢 Gesamt", stats["total"])
+    with col2:
+        st.metric("✅ Analysiert", stats["analyzed"])
+    with col3:
+        delta_color = "normal" if stats["uncertain"] == 0 else "inverse"
+        st.metric("⚠️ Unsicher", stats["uncertain"],
+                  help="Vertrauen < 50% oder unbekannte Kategorie")
+    with col4:
+        st.metric("🕐 Veraltet (30d)", stats["stale_30"],
+                  help="Seit mehr als 30 Tagen nicht analysiert")
+
+    # Frische-Balken
+    if stats["total"] > 0:
+        st.markdown(f"**Daten-Aktualität:** {stats['fresh_percent']}% aktuell")
+        st.progress(stats["fresh_percent"] / 100)
+
+    st.markdown("---")
+
+    tab1, tab2, tab3 = st.tabs(["🔬 Zweiter Durchlauf", "🔄 Veraltete aktualisieren", "📋 Details"])
+
+    with tab1:
+        st.subheader("🔬 Zweiter Analyse-Durchlauf")
+        st.markdown(
+            f"**{stats['uncertain']} Firmen** haben Vertrauen unter 50% oder unbekannte Kategorie. "
+            "Der zweite Durchlauf scannt mehr Unterseiten für bessere Ergebnisse."
+        )
+
+        uncertain = reanalyzer.get_uncertain_companies(companies)
+        if not uncertain:
+            st.success("✅ Alle analysierten Firmen haben gutes Vertrauen!")
+        else:
+            st.warning(f"⚠️ {len(uncertain)} Firmen brauchen einen zweiten Durchlauf")
+
+            # Vorschau der unsicheren Firmen
+            with st.expander(f"Liste der {len(uncertain)} unsicheren Firmen"):
+                for c in uncertain[:20]:
+                    st.markdown(
+                        f"• **{c['name']}** – Vertrauen: {c.get('vertrauen', 0)}% · "
+                        f"Kategorie: {c.get('kategorie', 'unbekannt')}"
+                    )
+
+            est_cost = len(uncertain) * 0.01
+            st.info(f"⏱️ Geschätzte Zeit: {len(uncertain) * 15} Sek. · Kosten: ca. €{est_cost:.2f}")
+
+            if st.button("🔬 Zweiten Durchlauf starten", type="primary"):
+                if not os.getenv("OPENAI_API_KEY"):
+                    st.error("OpenAI API Key fehlt!")
+                else:
+                    progress = st.progress(0)
+                    status = st.empty()
+
+                    def cb(current, total, msg):
+                        progress.progress(current / total)
+                        status.text(msg)
+
+                    with st.spinner("Tiefenanalyse läuft..."):
+                        results = reanalyzer.run_second_pass(progress_callback=cb)
+
+                    summary = reanalyzer.get_changes_summary(results)
+                    progress.progress(1.0)
+                    st.success(f"✅ {summary['successful']} Firmen neu analysiert!")
+
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Verbessert", summary["improved"])
+                    with col2:
+                        st.metric("Kategorie geändert", summary["category_changed"])
+                    with col3:
+                        st.metric("Fehlgeschlagen", summary["failed"])
+
+                    if summary["changes"]:
+                        st.subheader("🔄 Kategorie-Änderungen:")
+                        for ch in summary["changes"]:
+                            st.markdown(
+                                f"• **{ch['company']}**: "
+                                f"`{ch['old_kategorie']}` → `{ch['new_kategorie']}` · "
+                                f"Vertrauen: {ch['old_vertrauen']}% → {ch['new_vertrauen']}% · "
+                                f"({ch.get('pages_scanned', 0)} Seiten gescannt)"
+                            )
+
+    with tab2:
+        st.subheader("🔄 Veraltete Daten aktualisieren")
+        days = st.slider("Firmen älter als X Tage neu analysieren", 7, 90, 30)
+        stale = reanalyzer.get_stale_companies(companies, days=days)
+
+        if not stale:
+            st.success(f"✅ Alle Firmen wurden in den letzten {days} Tagen analysiert!")
+        else:
+            st.info(f"**{len(stale)}** Firmen wurden seit mehr als {days} Tagen nicht analysiert.")
+            est = len(stale) * 0.01
+            st.warning(f"⏱️ Geschätzte Zeit: {len(stale) * 15} Sek. · Kosten: ca. €{est:.2f}")
+
+            if st.button(f"🔄 {len(stale)} Firmen aktualisieren", type="primary"):
+                if not os.getenv("OPENAI_API_KEY"):
+                    st.error("OpenAI API Key fehlt!")
+                else:
+                    progress = st.progress(0)
+                    status = st.empty()
+
+                    def refresh_cb(current, total, msg):
+                        progress.progress(current / total)
+                        status.text(msg)
+
+                    with st.spinner("Aktualisierung läuft..."):
+                        results = reanalyzer.refresh_stale_companies(
+                            days=days, progress_callback=refresh_cb
+                        )
+
+                    summary = reanalyzer.get_changes_summary(results)
+                    progress.progress(1.0)
+                    st.success(f"✅ {summary['successful']} Firmen aktualisiert!")
+                    st.metric("Kategorie-Änderungen", summary["category_changed"])
+
+    with tab3:
+        st.subheader("📋 Unterseiten-Scan Details")
+        st.markdown("Welche Unterseiten wurden bei der letzten Analyse gescannt?")
+
+        analyzed = [c for c in companies if c.get("kategorie")]
+        if analyzed:
+            selected = st.selectbox("Firma auswählen", [c["name"] for c in analyzed[:50]])
+            sel = next((c for c in analyzed if c["name"] == selected), {})
+            if sel:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Vertrauen", f"{sel.get('vertrauen', 0)}%")
+                with col2:
+                    st.metric("Kategorie", sel.get("kategorie", "–"))
+
+                subpages = sel.get("subpages", [])
+                if subpages:
+                    st.markdown("**Gescannte Unterseiten:**")
+                    for p in subpages:
+                        st.markdown(f"• [{p}]({p})")
+                else:
+                    st.info("Nur Hauptseite gescannt – Re-Analyse für mehr Details.")
+
+                if st.button("🔬 Jetzt tief analysieren"):
+                    with st.spinner(f"Analysiere {selected}..."):
+                        result = reanalyzer.reanalyze_company(sel)
+                    if result["success"]:
+                        st.success(
+                            f"✅ Fertig! Vertrauen: {result['old_vertrauen']}% → "
+                            f"**{result['new_vertrauen']}%** · "
+                            f"{result['pages_scanned']} Seiten gescannt"
+                        )
+                        if result["old_kategorie"] != result["new_kategorie"]:
+                            st.info(
+                                f"Kategorie geändert: `{result['old_kategorie']}` → "
+                                f"`{result['new_kategorie']}`"
+                            )
+                    else:
+                        st.error(f"Fehler: {result.get('error')}")
+
 
 # ──────────────────────────────────────────────────────────
 # PAGE: Aktivitätslog
