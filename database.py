@@ -34,10 +34,6 @@ def init_db():
             lng REAL,
             industry TEXT,
             employee_count TEXT,
-            linkedin TEXT,
-            xing TEXT,
-            twitter TEXT,
-            instagram TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
@@ -72,19 +68,8 @@ def init_db():
             created_at TEXT DEFAULT (datetime('now'))
         );
     """)
-    # Migration: Social-Media-Spalten nachrüsten falls noch nicht vorhanden
-    _migrate_social_media_columns(conn)
-
     conn.commit()
     conn.close()
-
-
-def _migrate_social_media_columns(conn):
-    """Fügt Social-Media-Spalten zur bestehenden Datenbank hinzu (idempotent)."""
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(companies)")}
-    for col in ("linkedin", "xing", "twitter", "instagram"):
-        if col not in existing:
-            conn.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT")
 
 
 # ──────────────────────────────────────────────────────────
@@ -92,24 +77,18 @@ def _migrate_social_media_columns(conn):
 # ──────────────────────────────────────────────────────────
 
 def upsert_company(name, website, address="", city="", postal_code="",
-                   lat=None, lng=None, industry="", employee_count="",
-                   linkedin="", xing="", twitter="", instagram=""):
+                   lat=None, lng=None, industry="", employee_count=""):
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
-        INSERT INTO companies (name, website, address, city, postal_code, lat, lng,
-                               industry, employee_count, linkedin, xing, twitter, instagram)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO companies (name, website, address, city, postal_code, lat, lng, industry, employee_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(website) DO UPDATE SET
             name=excluded.name, address=excluded.address,
             city=excluded.city, lat=excluded.lat, lng=excluded.lng,
-            industry=excluded.industry,
-            linkedin=excluded.linkedin, xing=excluded.xing,
-            twitter=excluded.twitter, instagram=excluded.instagram,
-            updated_at=datetime('now')
+            industry=excluded.industry, updated_at=datetime('now')
         RETURNING id
-    """, (name, website, address, city, postal_code, lat, lng,
-          industry, employee_count, linkedin, xing, twitter, instagram))
+    """, (name, website, address, city, postal_code, lat, lng, industry, employee_count))
     row = c.fetchone()
     conn.commit()
     conn.close()
@@ -265,3 +244,45 @@ def get_stats():
         "total_companies": total,
         "by_category": {r["kategorie"]: r["cnt"] for r in by_category}
     }
+
+
+def update_company_analysis(company_id, kategorie, vertrauen, begruendung="",
+                             ki_anwendungen=None, biografie="", analyzed_at=None):
+    """Aktualisiert die Analyse einer Firma (für Re-Analyse)."""
+    import json
+    from datetime import datetime
+    conn = get_connection()
+    ts = analyzed_at or datetime.now().isoformat()
+    ki_json = json.dumps(ki_anwendungen or [], ensure_ascii=False)
+    conn.execute("""
+        INSERT INTO analyses
+            (company_id, kategorie, vertrauen, begruendung, ki_anwendungen, biografie, analyzed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (company_id, kategorie, vertrauen, begruendung, ki_json, biografie, ts))
+    # analyzed_at in companies-Tabelle aktualisieren
+    conn.execute("""
+        UPDATE companies SET analyzed_at = ? WHERE id = ?
+    """, (ts, company_id))
+    conn.commit()
+    conn.close()
+
+
+def get_companies_needing_refresh(days: int = 30, max_confidence: int = 55) -> list:
+    """Gibt Firmen zurück die Re-Analyse benötigen."""
+    from datetime import datetime, timedelta
+    conn = get_connection()
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    rows = conn.execute("""
+        SELECT c.*, a.kategorie, a.vertrauen, a.analyzed_at as last_analyzed
+        FROM companies c
+        LEFT JOIN analyses a ON a.company_id = c.id
+        WHERE c.website != ''
+        AND (
+            a.analyzed_at IS NULL
+            OR a.analyzed_at < ?
+            OR (a.kategorie IS NOT NULL AND a.vertrauen < ?)
+        )
+        ORDER BY a.vertrauen ASC
+    """, (cutoff, max_confidence)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
