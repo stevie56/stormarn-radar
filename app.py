@@ -666,6 +666,7 @@ with st.sidebar:
         "📈 Trends & Statistik",
         "🏅 KI-Ranking",
         "🌍 Regionalvergleich",
+        "🚌 Mobilitätsatlas",
         "📄 PDF-Export",
         "📧 Wochenbericht",
         "📋 Aktivitätslog",
@@ -1014,6 +1015,355 @@ elif page == "🌍 Regionalvergleich":
         prefix = "👉 **" if "Stormarn" in region else ""
         suffix = "**" if "Stormarn" in region else ""
         st.markdown(f"{i}. {prefix}{region}{suffix}: **{quote}%**")
+
+# ── MOBILITÄTSATLAS ────────────────────────────────────────
+elif page == "🚌 Mobilitätsatlas":
+    st.title("🚌 Mobilitätsatlas Kreis Stormarn")
+    st.markdown("*Infrastruktur, ÖPNV, E-Mobilität und Mobilitätsunternehmen im Überblick*")
+
+    # ── Statische Infrastruktur-Daten ────────────────────────
+    BAHNHOEFE = [
+        {"name": "Bad Oldesloe",     "lat": 53.8091, "lon": 10.3706, "typ": "Regionalbahn",  "linien": ["RE70", "RB81"], "pr_plaetze": 210},
+        {"name": "Reinfeld (Holst.)", "lat": 53.8334, "lon": 10.2850, "typ": "Regionalbahn", "linien": ["RE70"],         "pr_plaetze": 95},
+        {"name": "Bargteheide",      "lat": 53.7263, "lon": 10.2630, "typ": "Regionalbahn",  "linien": ["RE70", "RB81"], "pr_plaetze": 130},
+        {"name": "Ahrensburg",       "lat": 53.6741, "lon": 10.2376, "typ": "S-Bahn",        "linien": ["S4"],           "pr_plaetze": 320},
+        {"name": "Ahrensburg West",  "lat": 53.6711, "lon": 10.2182, "typ": "S-Bahn",        "linien": ["S4"],           "pr_plaetze": 85},
+        {"name": "Großhansdorf",     "lat": 53.6547, "lon": 10.2750, "typ": "U-Bahn",        "linien": ["U1"],           "pr_plaetze": 0},
+        {"name": "Reinbek",          "lat": 53.5125, "lon": 10.2525, "typ": "S-Bahn",        "linien": ["S21"],          "pr_plaetze": 145},
+        {"name": "Aumühle",          "lat": 53.5300, "lon": 10.3100, "typ": "S-Bahn",        "linien": ["S21"],          "pr_plaetze": 180},
+        {"name": "Glinde",           "lat": 53.5394, "lon": 10.2044, "typ": "Regionalbahn",  "linien": ["RB61"],         "pr_plaetze": 60},
+        {"name": "Ohlstedt",         "lat": 53.6600, "lon": 10.1900, "typ": "U-Bahn",        "linien": ["U1"],           "pr_plaetze": 0},
+        {"name": "Volksdorf",        "lat": 53.6533, "lon": 10.1744, "typ": "U-Bahn",        "linien": ["U1"],           "pr_plaetze": 50},
+    ]
+
+    LADEINFRA = [
+        {"name": "E-Ladesäule Bad Oldesloe ZOB",    "lat": 53.8095, "lon": 10.3700, "anschlüsse": 4,  "leistung_kw": 50},
+        {"name": "E-Ladesäule Ahrensburg P+R",      "lat": 53.6745, "lon": 10.2380, "anschlüsse": 6,  "leistung_kw": 150},
+        {"name": "E-Ladesäule Bargteheide Markt",   "lat": 53.7268, "lon": 10.2635, "anschlüsse": 2,  "leistung_kw": 22},
+        {"name": "E-Ladesäule Reinbek Bahnhof",     "lat": 53.5128, "lon": 10.2530, "anschlüsse": 4,  "leistung_kw": 50},
+        {"name": "E-Ladesäule Glinde Markt",        "lat": 53.5390, "lon": 10.2050, "anschlüsse": 2,  "leistung_kw": 22},
+        {"name": "E-Ladesäule Trittau",             "lat": 53.6200, "lon": 10.4200, "anschlüsse": 2,  "leistung_kw": 22},
+        {"name": "E-Ladesäule Großhansdorf",        "lat": 53.6550, "lon": 10.2760, "anschlüsse": 2,  "leistung_kw": 22},
+        {"name": "E-Ladesäule Reinfeld",            "lat": 53.8340, "lon": 10.2860, "anschlüsse": 2,  "leistung_kw": 22},
+        {"name": "E-Ladesäule Schwarzenbek",        "lat": 53.4900, "lon": 10.4850, "anschlüsse": 4,  "leistung_kw": 50},
+        {"name": "E-Ladesäule HNK Bad Oldesloe",    "lat": 53.8100, "lon": 10.3750, "anschlüsse": 2,  "leistung_kw": 22},
+    ]
+
+    GEMEINDEN = [
+        {"name": "Bad Oldesloe",  "lat": 53.8091, "lon": 10.3706, "einwohner": 25000, "flaeche_km2": 51,  "ki_quote": 8},
+        {"name": "Ahrensburg",    "lat": 53.6741, "lon": 10.2376, "einwohner": 34000, "flaeche_km2": 25,  "ki_quote": 12},
+        {"name": "Reinbek",       "lat": 53.5125, "lon": 10.2525, "einwohner": 28000, "flaeche_km2": 29,  "ki_quote": 9},
+        {"name": "Glinde",        "lat": 53.5394, "lon": 10.2044, "einwohner": 18500, "flaeche_km2": 12,  "ki_quote": 7},
+        {"name": "Bargteheide",   "lat": 53.7263, "lon": 10.2630, "einwohner": 16000, "flaeche_km2": 22,  "ki_quote": 6},
+        {"name": "Großhansdorf",  "lat": 53.6547, "lon": 10.2750, "einwohner": 9700,  "flaeche_km2": 17,  "ki_quote": 10},
+        {"name": "Reinfeld",      "lat": 53.8334, "lon": 10.2850, "einwohner": 8500,  "flaeche_km2": 18,  "ki_quote": 5},
+        {"name": "Trittau",       "lat": 53.6200, "lon": 10.4200, "einwohner": 6800,  "flaeche_km2": 26,  "ki_quote": 5},
+    ]
+
+    MOBILITAETS_UNTERNEHMEN = [
+        {"name": "PVG Pinneberg-Stormarn",    "typ": "ÖPNV",          "ort": "Bad Oldesloe",  "beschreibung": "Regionaler Busverkehr im Kreis Stormarn (HVV-Verbundunternehmen)"},
+        {"name": "DB Regio AG",               "typ": "Bahn",          "ort": "Hamburg",       "beschreibung": "Regionalzugverbindungen RE70 und weitere Linien durch Stormarn"},
+        {"name": "Hochbahn AG",               "typ": "U-Bahn",        "ort": "Hamburg",       "beschreibung": "U1-Betrieb bis Großhansdorf und Ohlstedt (Stormarn)"},
+        {"name": "S-Bahn Hamburg GmbH",       "typ": "S-Bahn",        "ort": "Hamburg",       "beschreibung": "S4-Ausbau Hamburg–Bad Oldesloe in Planung/Bau"},
+        {"name": "Kreiswerke Stormarn",       "typ": "E-Mobilität",   "ort": "Bad Oldesloe",  "beschreibung": "Betreiber öffentlicher Ladeinfrastruktur im Kreis"},
+        {"name": "ADFC Kreisverband Stormarn","typ": "Fahrrad",       "ort": "Stormarn",      "beschreibung": "Förderung des Radverkehrs und des Radwegenetzes"},
+        {"name": "car2go / Share Now",        "typ": "Carsharing",    "ort": "Hamburg",       "beschreibung": "Carsharing-Angebote im südlichen Stormarn (Hamburger Randgebiet)"},
+        {"name": "Taxi-Verbund Stormarn",     "typ": "Taxi",          "ort": "Bad Oldesloe",  "beschreibung": "Lokale Taxiunternehmen und Beförderungsdienste"},
+        {"name": "DEVK / Mobilitätsberatung", "typ": "Beratung",      "ort": "Ahrensburg",    "beschreibung": "Mobilitätsberatung für Unternehmen und Gemeinden"},
+        {"name": "nextbike (HVV hop)",        "typ": "Bikesharing",   "ort": "Ahrensburg",    "beschreibung": "HVV-integriertes Fahrradleihsystem in Ahrensburg"},
+    ]
+
+    OEFFENTLICHE_PROJEKTE = [
+        {"projekt": "S4-Ausbau Hamburg–Bad Oldesloe",      "status": "Im Bau",       "fertig": "2027",  "investition_mio": 1200, "beschreibung": "Neue S-Bahn-Linie mit 12 Stationen, verkürzt Reisezeit auf 35 min"},
+        {"projekt": "Radschnellweg RS1 (Hamburg–Ahrensburg)","status": "Planung",    "fertig": "2028",  "investition_mio": 45,   "beschreibung": "Durchgehende Radschnellverbindung von Hamburg nach Ahrensburg"},
+        {"projekt": "P+R-Ausbau Bad Oldesloe",              "status": "Abgeschlossen","fertig": "2024", "investition_mio": 3,    "beschreibung": "Erweiterung des Park+Ride auf 210 Stellplätze"},
+        {"projekt": "E-Ladenetz Stormarn 2030",             "status": "Laufend",     "fertig": "2030",  "investition_mio": 8,    "beschreibung": "Ziel: 500 öffentliche Ladepunkte bis 2030"},
+        {"projekt": "Mobilitätsstationen Kreis Stormarn",   "status": "Pilotphase",  "fertig": "2026",  "investition_mio": 2,    "beschreibung": "Verknüpfungspunkte für ÖPNV, Rad, Carsharing in 5 Gemeinden"},
+    ]
+
+    # ── Kennzahlen berechnen ─────────────────────────────────
+    total_pr = sum(b["pr_plaetze"] for b in BAHNHOEFE)
+    total_ladepunkte = sum(l["anschlüsse"] for l in LADEINFRA)
+    total_leistung = sum(l["leistung_kw"] * l["anschlüsse"] for l in LADEINFRA)
+    sbahn_bf = [b for b in BAHNHOEFE if b["typ"] == "S-Bahn"]
+    rbahn_bf = [b for b in BAHNHOEFE if b["typ"] == "Regionalbahn"]
+
+    # ── Tabs ─────────────────────────────────────────────────
+    tab_ue, tab_karte, tab_oeffentlich, tab_emob, tab_unternehmen = st.tabs([
+        "📊 Übersicht", "🗺️ Karte", "🚆 ÖPNV & Projekte", "🔌 E-Mobilität", "🏢 Unternehmen"
+    ])
+
+    # ── TAB: ÜBERSICHT ───────────────────────────────────────
+    with tab_ue:
+        st.subheader("📊 Mobilitätskennzahlen Kreis Stormarn")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("🚉 Bahnhöfe / Haltestellen", len(BAHNHOEFE))
+        c2.metric("🅿️ P+R-Stellplätze gesamt", total_pr)
+        c3.metric("🔌 Öffentliche Ladepunkte", total_ladepunkte)
+        c4.metric("⚡ Installierte Ladekapazität", f"{total_leistung} kW")
+
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("🚆 Schienenanbindung")
+            typ_count = {}
+            for b in BAHNHOEFE:
+                typ_count[b["typ"]] = typ_count.get(b["typ"], 0) + 1
+            typ_df = pd.DataFrame(list(typ_count.items()), columns=["Typ", "Bahnhöfe"])
+            st.bar_chart(typ_df.set_index("Typ"))
+
+        with col2:
+            st.subheader("🔌 Ladeinfrastruktur nach Leistung")
+            lade_df = pd.DataFrame([
+                {"Standort": l["name"].replace("E-Ladesäule ", "")[:20],
+                 "Kapazität (kW)": l["leistung_kw"] * l["anschlüsse"]}
+                for l in LADEINFRA
+            ])
+            st.bar_chart(lade_df.set_index("Standort"))
+
+        st.markdown("---")
+        st.subheader("🏘️ Einwohner & Mobilität nach Gemeinden")
+        gem_df = pd.DataFrame(GEMEINDEN)[["name", "einwohner", "flaeche_km2", "ki_quote"]]
+        gem_df.columns = ["Gemeinde", "Einwohner", "Fläche km²", "KI-Quote %"]
+        st.dataframe(gem_df, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.subheader("🚆 S4 – Das Megaprojekt für Stormarn")
+        st.info(
+            "Die **S4-Verlängerung Hamburg HBF → Bad Oldesloe** ist das größte Mobilitätsprojekt "
+            "des Kreises Stormarn. Mit einer Investition von **1,2 Milliarden Euro** und 12 neuen Stationen "
+            "wird die Reisezeit Hamburg – Bad Oldesloe auf **35 Minuten** verkürzt. "
+            "Geplante Fertigstellung: **2027**."
+        )
+        cols = st.columns(4)
+        cols[0].metric("Investition", "1,2 Mrd. €")
+        cols[1].metric("Neue Stationen", "12")
+        cols[2].metric("Reisezeit", "35 min")
+        cols[3].metric("Fertigstellung", "2027")
+
+    # ── TAB: KARTE ───────────────────────────────────────────
+    with tab_karte:
+        st.subheader("🗺️ Mobilitätsinfrastruktur Kreis Stormarn")
+
+        col1, col2, col3 = st.columns(3)
+        show_bahnhoefe = col1.checkbox("🚉 Bahnhöfe/Haltestellen", value=True)
+        show_ladeinfra = col2.checkbox("🔌 Ladeinfrastruktur", value=True)
+        show_pr        = col3.checkbox("🅿️ Nur mit P+R", value=False)
+
+        m = folium.Map(location=[53.69, 10.28], zoom_start=10)
+
+        typ_farben = {
+            "S-Bahn":      "green",
+            "Regionalbahn": "blue",
+            "U-Bahn":      "purple",
+        }
+
+        if show_bahnhoefe:
+            bf_liste = [b for b in BAHNHOEFE if not show_pr or b["pr_plaetze"] > 0]
+            for bf in bf_liste:
+                farbe = typ_farben.get(bf["typ"], "gray")
+                pr_text = f"<br>🅿️ P+R: {bf['pr_plaetze']} Plätze" if bf["pr_plaetze"] > 0 else ""
+                linien_text = " · ".join(bf["linien"])
+                popup_html = (
+                    f"<b>🚉 {bf['name']}</b><br>"
+                    f"Typ: {bf['typ']}<br>"
+                    f"Linien: {linien_text}"
+                    f"{pr_text}"
+                )
+                folium.CircleMarker(
+                    location=[bf["lat"], bf["lon"]],
+                    radius=9,
+                    color=farbe,
+                    fill=True,
+                    fill_opacity=0.85,
+                    popup=folium.Popup(popup_html, max_width=220),
+                    tooltip=bf["name"],
+                ).add_to(m)
+
+        if show_ladeinfra:
+            for ls in LADEINFRA:
+                popup_html = (
+                    f"<b>🔌 {ls['name']}</b><br>"
+                    f"Anschlüsse: {ls['anschlüsse']}<br>"
+                    f"Max. Leistung: {ls['leistung_kw']} kW"
+                )
+                folium.Marker(
+                    location=[ls["lat"], ls["lon"]],
+                    popup=folium.Popup(popup_html, max_width=200),
+                    tooltip=ls["name"],
+                    icon=folium.Icon(color="orange", icon="bolt", prefix="fa"),
+                ).add_to(m)
+
+        st_folium(m, width=None, height=520)
+
+        st.markdown(
+            "🟢 **S-Bahn** · 🔵 **Regionalbahn** · 🟣 **U-Bahn** · "
+            "🟠 **Ladeinfrastruktur**"
+        )
+
+        st.markdown("---")
+        st.subheader("🚉 Alle Bahnhöfe & Haltestellen")
+        bf_data = []
+        for bf in BAHNHOEFE:
+            bf_data.append({
+                "Haltestelle": bf["name"],
+                "Typ": bf["typ"],
+                "Linien": " · ".join(bf["linien"]),
+                "P+R Plätze": bf["pr_plaetze"] if bf["pr_plaetze"] > 0 else "–",
+            })
+        st.dataframe(pd.DataFrame(bf_data), use_container_width=True, hide_index=True)
+
+    # ── TAB: ÖPNV & PROJEKTE ─────────────────────────────────
+    with tab_oeffentlich:
+        st.subheader("🚆 ÖPNV-Linien im Kreis Stormarn")
+
+        st.markdown("""
+| Linie | Typ | Strecke | Takt (HVZ) |
+|-------|-----|---------|------------|
+| **S4** | S-Bahn | Hamburg Hbf → Bad Oldesloe *(im Bau)* | 20 min |
+| **S21** | S-Bahn | Hamburg → Aumühle / Reinbek | 10 min |
+| **U1** | U-Bahn | Hamburg → Ohlstedt / Großhansdorf | 10 min |
+| **RE70** | Regionalbahn | Hamburg → Bad Oldesloe → Lübeck | 30 min |
+| **RB81** | Regionalbahn | Hamburg → Ahrensburg → Bad Oldesloe | 60 min |
+| **6108** | Bus (HVV) | Ahrensburg – Bargteheide | 30 min |
+| **8580** | Bus (HVV) | Bad Oldesloe – Reinfeld – Lübeck | 60 min |
+| **8850** | Bus (HVV) | Glinde – Reinbek – Hamburg | 20 min |
+        """)
+
+        st.markdown("---")
+        st.subheader("🏗️ Mobilitätsprojekte im Kreis Stormarn")
+
+        status_farben = {
+            "Im Bau":        "🟡",
+            "Planung":       "🔵",
+            "Laufend":       "🟢",
+            "Pilotphase":    "🟠",
+            "Abgeschlossen": "✅",
+        }
+
+        for proj in OEFFENTLICHE_PROJEKTE:
+            icon = status_farben.get(proj["status"], "⬜")
+            with st.expander(f"{icon} **{proj['projekt']}** – {proj['status']} (bis {proj['fertig']})"):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Status", proj["status"])
+                c2.metric("Fertigstellung", proj["fertig"])
+                c3.metric("Investition", f"{proj['investition_mio']} Mio. €")
+                st.markdown(proj["beschreibung"])
+
+        st.markdown("---")
+        st.subheader("📊 Mobilitätsprojekte – Übersicht")
+        proj_df = pd.DataFrame(OEFFENTLICHE_PROJEKTE)[["projekt", "status", "fertig", "investition_mio"]]
+        proj_df.columns = ["Projekt", "Status", "Fertig", "Invest. (Mio. €)"]
+        st.dataframe(proj_df, use_container_width=True, hide_index=True)
+
+    # ── TAB: E-MOBILITÄT ────────────────────────────────────
+    with tab_emob:
+        st.subheader("🔌 E-Mobilität im Kreis Stormarn")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("⚡ Öffentliche Ladepunkte", total_ladepunkte)
+        c2.metric("🔋 Gesamtleistung", f"{total_leistung} kW")
+        c3.metric("📍 Standorte", len(LADEINFRA))
+
+        st.markdown("---")
+        st.subheader("📍 Ladeinfrastruktur-Standorte")
+        lade_table = []
+        for l in LADEINFRA:
+            lade_table.append({
+                "Standort": l["name"].replace("E-Ladesäule ", ""),
+                "Anschlüsse": l["anschlüsse"],
+                "Max. Leistung": f"{l['leistung_kw']} kW",
+                "Ges. Kapazität": f"{l['leistung_kw'] * l['anschlüsse']} kW",
+            })
+        st.dataframe(pd.DataFrame(lade_table), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.subheader("🎯 Ziel: E-Ladenetz Stormarn 2030")
+        aktuell = total_ladepunkte
+        ziel = 500
+        fortschritt = aktuell / ziel
+        st.markdown(f"**{aktuell} von {ziel} Ziel-Ladepunkten** ({round(fortschritt*100,1)}%)")
+        st.progress(fortschritt)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Bereits erreicht:**")
+            st.markdown(f"- ✅ {aktuell} öffentliche Ladepunkte")
+            st.markdown(f"- ✅ {len(LADEINFRA)} Standorte im Kreis")
+            st.markdown(f"- ✅ Schnelllader (≥50 kW) an Bahnhöfen")
+        with col2:
+            st.markdown("**Noch geplant bis 2030:**")
+            st.markdown(f"- ⏳ {ziel - aktuell} weitere Ladepunkte")
+            st.markdown("- ⏳ Schnellladenetz an allen ÖPNV-Knotenpunkten")
+            st.markdown("- ⏳ Ladesäulen in allen 57 Gemeinden")
+
+        st.markdown("---")
+        st.subheader("🚗 E-Mobilität & KI – Synergien")
+        st.info(
+            "Unternehmen im KI-Radar, die auch Mobilitätstechnologien einsetzen, "
+            "können über die KI-Analyse-Seite gefunden werden. "
+            "Nutze die **➕ Neu analysieren**-Funktion, um Mobilitätsunternehmen aus der Region zu scannen."
+        )
+
+        # Verbindung zu KI-Radar: Mobilitätsfirmen die schon analysiert sind
+        ki_firmen = get_all_companies()
+        mob_keywords = ["fahrzeug", "transport", "logistik", "spedition", "mobilit",
+                        "fahrrad", "bus", "bahn", "auto", "fleet", "fuhrpark"]
+        mob_firmen = [
+            f for f in ki_firmen
+            if any(kw in (f.get("industry","") + f.get("name","")).lower() for kw in mob_keywords)
+        ]
+        if mob_firmen:
+            st.subheader("🔗 Mobilitätsnahe Unternehmen im KI-Radar")
+            for f in mob_firmen[:10]:
+                icon = KAT_ICONS.get(f.get("kategorie",""), "❓")
+                st.markdown(f"- {icon} **{f['name']}** · {f.get('city','–')} · {f.get('industry','–')}")
+
+    # ── TAB: UNTERNEHMEN ────────────────────────────────────
+    with tab_unternehmen:
+        st.subheader("🏢 Mobilitätsunternehmen & -akteure im Kreis Stormarn")
+
+        typ_filter = st.selectbox(
+            "Nach Typ filtern",
+            ["Alle"] + sorted(set(u["typ"] for u in MOBILITAETS_UNTERNEHMEN))
+        )
+
+        anz_gefiltert = [
+            u for u in MOBILITAETS_UNTERNEHMEN
+            if typ_filter == "Alle" or u["typ"] == typ_filter
+        ]
+
+        st.info(f"**{len(anz_gefiltert)}** Unternehmen/Akteure" + (f" · Filter: {typ_filter}" if typ_filter != "Alle" else ""))
+
+        typ_icons = {
+            "ÖPNV":       "🚌",
+            "Bahn":       "🚆",
+            "S-Bahn":     "🚊",
+            "U-Bahn":     "🚇",
+            "E-Mobilität":"🔌",
+            "Fahrrad":    "🚲",
+            "Carsharing": "🚗",
+            "Taxi":       "🚕",
+            "Bikesharing":"🚴",
+            "Beratung":   "📋",
+        }
+
+        for u in anz_gefiltert:
+            icon = typ_icons.get(u["typ"], "🏢")
+            with st.expander(f"{icon} **{u['name']}** – {u['typ']} · {u['ort']}"):
+                c1, c2 = st.columns(2)
+                c1.metric("Typ", u["typ"])
+                c2.metric("Standort", u["ort"])
+                st.markdown(u["beschreibung"])
+
+        st.markdown("---")
+        st.subheader("📊 Verteilung nach Typ")
+        typ_count = {}
+        for u in MOBILITAETS_UNTERNEHMEN:
+            typ_count[u["typ"]] = typ_count.get(u["typ"], 0) + 1
+        typ_df = pd.DataFrame(list(typ_count.items()), columns=["Typ", "Anzahl"])
+        st.bar_chart(typ_df.set_index("Typ"))
 
 # ── PDF-EXPORT ─────────────────────────────────────────────
 elif page == "📄 PDF-Export":
